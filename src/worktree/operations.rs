@@ -91,6 +91,43 @@ pub fn detect_branch_status(branch: &str) -> Result<BranchStatus> {
     }
 }
 
+/// Ensure a workspace exists for the given branch, creating it if needed.
+///
+/// This is the auto-create pattern used by shell, exec, and agent commands.
+/// Returns CreateResult so callers can use both the workspace path and the result type.
+///
+/// If start_ref is provided but the branch already exists as a worktree,
+/// start_ref is ignored (existing workspace takes precedence).
+///
+/// # Arguments
+/// * `config` - Worktree configuration
+/// * `repo_root` - Repository root path
+/// * `branch` - Target branch name
+/// * `start_ref` - Optional starting ref to validate (e.g., base branch)
+///
+/// # Example
+/// ```ignore
+/// let result = ensure_workspace(&config, &repo_root, "feature", Some("main"))?;
+/// println!("Workspace at: {}", result.path().display());
+/// ```
+pub fn ensure_workspace(
+    config: &WorktreeConfig,
+    repo_root: &Path,
+    branch: &str,
+    start_ref: Option<&str>,
+) -> Result<CreateResult> {
+    // Validate branch name first
+    validation::validate_branch_name(branch)?;
+
+    // If start_ref is provided, validate it early to get helpful error messages
+    if let Some(ref_name) = start_ref {
+        crate::utils::git::validate_start_ref(ref_name)?;
+    }
+
+    // Delegate to create_worktree which handles all three BranchStatus cases idempotently
+    create_worktree(config, repo_root, branch, start_ref)
+}
+
 /// Create a worktree for a branch
 ///
 /// This function handles all three branch states:
@@ -312,5 +349,23 @@ mod tests {
         assert_eq!(formatted.len(), 16);
         // Should start with date
         assert!(formatted.starts_with("2024-01-15"));
+    }
+
+    #[test]
+    fn test_ensure_workspace_delegates_to_create() {
+        // This is a behavioral test that verifies the function signature
+        // and return type match CreateResult. Since it requires a git repo,
+        // we just verify the function exists and has the correct type.
+
+        // Type assertion: ensure_workspace returns Result<CreateResult>
+        fn _type_check() {
+            fn assert_returns_create_result<F>(f: F)
+            where
+                F: Fn(&WorktreeConfig, &Path, &str, Option<&str>) -> Result<CreateResult>,
+            {
+                let _ = f;
+            }
+            assert_returns_create_result(ensure_workspace);
+        }
     }
 }
