@@ -21,9 +21,11 @@ enum Command {
     Create(create::CreateArgs),
 
     /// List all worktrees
+    #[command(alias = "ls")]
     List(list::ListArgs),
 
     /// Remove worktree(s)
+    #[command(alias = "rm")]
     Remove(remove::RemoveArgs),
 
     /// Clean orphaned worktrees
