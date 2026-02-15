@@ -1,3 +1,4 @@
+use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
 use crate::worktree::{operations, recovery, validation};
@@ -23,11 +24,14 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
     validation::check_git_version()?;
 
     // Find repository root
-    let _repo_root = get_git_root()?.ok_or_else(|| {
+    let repo_root = get_git_root()?.ok_or_else(|| {
         crate::error::AgentreeError::Worktree(
             "Not in a git repository. Run this command from inside a git repository.".to_string(),
         )
     })?;
+
+    // Load config (for consistency and future use)
+    let _config = config::load(&repo_root)?;
 
     // Handle --merged mode
     if let Some(base) = args.merged {
