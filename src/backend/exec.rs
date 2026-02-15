@@ -73,6 +73,32 @@ pub fn run_captured(binary: &str, args: &[&str], working_dir: &Path) -> Result<E
     ))
 }
 
+/// Run a command directly on the host (common implementation for backends that don't isolate exec)
+///
+/// This is used by backends that run exec commands directly on the host rather than in isolation.
+/// For example, claude-vm runs shell/agent in the VM but exec on the host per BACK-08.
+///
+/// # Arguments
+/// * `workspace_path` - The workspace directory to run the command in
+/// * `command` - The command and arguments to execute (command[0] is the binary)
+/// * `backend_name` - The name of the backend for error messages
+pub fn run_host_command(
+    workspace_path: &Path,
+    command: &[String],
+    backend_name: &str,
+) -> Result<ExecOutput> {
+    if command.is_empty() {
+        return Err(AgentreeError::BackendExecution {
+            backend: backend_name.to_string(),
+            error: "No command provided".to_string(),
+        });
+    }
+
+    // Convert &[String] to &[&str] for run_captured
+    let args: Vec<&str> = command[1..].iter().map(|s| s.as_str()).collect();
+    run_captured(&command[0], &args, workspace_path)
+}
+
 /// Get the version of a binary by running it with a version flag
 pub fn get_binary_version(binary: &str, version_flag: &str) -> Result<String> {
     let output = Command::new(binary)

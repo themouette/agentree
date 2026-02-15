@@ -1,4 +1,4 @@
-use crate::backend::exec::{run_captured, run_interactive, ExecOutput};
+use crate::backend::exec::{run_host_command, run_interactive, ExecOutput};
 use crate::backend::Backend;
 use crate::error::Result;
 use std::path::Path;
@@ -39,16 +39,7 @@ impl Backend for ClaudeBackend {
 
     fn exec(&self, workspace_path: &Path, command: &[String]) -> Result<ExecOutput> {
         // Run directly on host - no isolation for exec
-        if command.is_empty() {
-            return Err(crate::error::AgentreeError::BackendExecution {
-                backend: self.name().to_string(),
-                error: "No command provided".to_string(),
-            });
-        }
-
-        // Convert &[String] to &[&str] for run_captured
-        let args: Vec<&str> = command[1..].iter().map(|s| s.as_str()).collect();
-        run_captured(&command[0], &args, workspace_path)
+        run_host_command(workspace_path, command, self.name())
     }
 
     fn agent(&self, workspace_path: &Path, flags: &[String]) -> Result<()> {

@@ -12,7 +12,7 @@ mod registry;
 
 pub use claude::ClaudeBackend;
 pub use claude_vm::ClaudeVmBackend;
-pub use exec::ExecOutput;
+pub use exec::{run_host_command, ExecOutput};
 pub use local::LocalBackend;
 pub use registry::BackendRegistry;
 
