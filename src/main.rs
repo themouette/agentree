@@ -7,6 +7,21 @@ use std::process;
 #[command(name = "agentree")]
 #[command(about = "Workspace orchestration CLI with pluggable isolation backends", long_about = None)]
 #[command(version = version::VERSION)]
+#[command(after_help = "\
+AGENT SHORTCUTS:
+    agentree claude <branch> [flags]     Equivalent to: agentree agent <branch> --agent claude
+    agentree opencode <branch> [flags]   Equivalent to: agentree agent <branch> --agent opencode
+
+COMMAND ALIASES:
+    ls      List all worktrees (alias for 'list')
+    rm      Remove worktree(s) (alias for 'remove')
+
+EXAMPLES:
+    agentree claude feature              Start Claude in feature branch workspace
+    agentree opencode hotfix main        Start OpenCode in hotfix branch (from main)
+    agentree ls --json                   List worktrees in JSON format
+    agentree rm --merged main            Remove all merged worktrees
+")]
 struct Cli {
     #[command(subcommand)]
     command: Command,
