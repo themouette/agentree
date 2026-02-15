@@ -1,4 +1,6 @@
-use agentree::commands::{agent, cd, clean, completion, create, exec, list, remove, shell, shell_init, update};
+use agentree::commands::{
+    agent, cd, clean, completion, create, exec, list, remove, shell, shell_init, update,
+};
 use agentree::version;
 use clap::{CommandFactory, Parser, Subcommand};
 use std::process;
