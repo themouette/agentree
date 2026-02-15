@@ -24,6 +24,8 @@ impl TestRepo {
         self.git(&["init"]);
         self.git(&["config", "user.email", "test@example.com"]);
         self.git(&["config", "user.name", "Test User"]);
+        // Disable GPG signing for tests
+        self.git(&["config", "commit.gpgsign", "false"]);
         // Ensure we're on main branch for consistency
         self.git(&["checkout", "-b", "main"]);
     }

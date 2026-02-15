@@ -1,6 +1,7 @@
 mod helpers;
 
 use helpers::*;
+use std::process::Command;
 
 #[test]
 fn test_create_and_list_worktree() {
@@ -222,4 +223,263 @@ fn test_clean_no_orphans() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Cleanup complete"), "Should show completion message");
+}
+
+// ===== Phase 4 Integration Tests =====
+
+#[test]
+fn test_create_saves_metadata() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "metadata-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Verify metadata via list --json (simpler than filesystem checks)
+    let output = test_repo.agentree(&["list", "--json"]);
+    assert!(output.status.success(), "list --json should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .expect("Output should be valid JSON");
+
+    let worktrees = json.as_array().expect("Should be array");
+    let metadata_worktree = worktrees
+        .iter()
+        .find(|w| w.get("branch").and_then(|b| b.as_str()) == Some("metadata-test"))
+        .expect("Should find metadata-test worktree");
+
+    // Verify metadata fields exist
+    assert!(
+        metadata_worktree.get("backend").is_some(),
+        "Should have backend field"
+    );
+    assert!(
+        metadata_worktree.get("created").is_some(),
+        "Should have created field"
+    );
+
+    // Backend should be "local" (default when no config)
+    let backend = metadata_worktree
+        .get("backend")
+        .and_then(|b| b.as_str())
+        .expect("backend should be a string");
+    assert_eq!(backend, "local", "Default backend should be 'local'");
+}
+
+#[test]
+fn test_list_shows_backend_column() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "backend-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List worktrees in table format
+    let output = test_repo.agentree(&["list"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify table has BACKEND column
+    assert!(
+        stdout.contains("BACKEND"),
+        "Table header should include BACKEND column"
+    );
+
+    // Verify worktree row shows backend (should be "local")
+    let lines: Vec<&str> = stdout.lines().collect();
+    let backend_row = lines.iter().find(|line| line.contains("backend-test"));
+    assert!(backend_row.is_some(), "Should find backend-test in list");
+
+    let row = backend_row.unwrap();
+    assert!(
+        row.contains("local"),
+        "Should show 'local' backend in row: {}",
+        row
+    );
+}
+
+#[test]
+fn test_list_json_includes_backend() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "json-backend-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List with JSON output
+    let output = test_repo.agentree(&["list", "--json"]);
+    assert!(output.status.success(), "list --json should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .expect("Output should be valid JSON");
+
+    let array = json.as_array().expect("Should be array");
+    assert!(array.len() >= 1, "Should have at least one worktree");
+
+    // Find our worktree
+    let worktree = array
+        .iter()
+        .find(|w| w.get("branch").and_then(|b| b.as_str()) == Some("json-backend-test"))
+        .expect("Should find json-backend-test");
+
+    // Verify fields exist
+    assert!(worktree.get("backend").is_some(), "Should have backend field");
+    assert!(worktree.get("created").is_some(), "Should have created field");
+
+    // Verify backend value
+    let backend = worktree.get("backend").and_then(|b| b.as_str());
+    assert_eq!(backend, Some("local"), "Backend should be 'local'");
+}
+
+#[test]
+fn test_cd_prints_path() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "cd-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Run cd command
+    let output = test_repo.agentree(&["cd", "cd-test"]);
+    assert!(output.status.success(), "cd should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify output format
+    assert!(
+        stdout.starts_with("cd '"),
+        "Output should start with 'cd '': {}",
+        stdout
+    );
+
+    // Verify path contains worktree directory
+    let worktrees_dir = test_repo.worktrees_dir();
+    let worktree_path = worktrees_dir
+        .join(test_repo.path().file_name().unwrap())
+        .join("cd-test");
+    let expected_in_output = worktree_path.to_string_lossy();
+
+    assert!(
+        stdout.contains(&*expected_in_output),
+        "Output should contain worktree path. Expected substring: {}, Got: {}",
+        expected_in_output,
+        stdout
+    );
+}
+
+#[test]
+fn test_cd_nonexistent_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Try cd to nonexistent branch
+    let output = test_repo.agentree(&["cd", "nonexistent-branch"]);
+    assert!(
+        !output.status.success(),
+        "cd should fail for nonexistent branch"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("No worktree found") || stderr.contains("nonexistent-branch"),
+        "Error should mention worktree not found or branch name: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_list_shows_created_column() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "created-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List worktrees
+    let output = test_repo.agentree(&["list"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify table has CREATED column
+    assert!(
+        stdout.contains("CREATED"),
+        "Table header should include CREATED column"
+    );
+}
+
+#[test]
+fn test_remove_merged_cleanup() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for merge-test branch
+    let output = test_repo.agentree(&["create", "merge-test"]);
+    assert!(
+        output.status.success(),
+        "create should succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Switch to worktree and create a commit
+    let worktrees_dir = test_repo.worktrees_dir();
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = worktrees_dir.join(repo_name).join("merge-test");
+
+    std::fs::write(worktree_path.join("merge-file.txt"), "merge content")
+        .expect("Failed to create file in worktree");
+
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git add should work");
+
+    Command::new("git")
+        .args(["commit", "-m", "Add merge file"])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git commit should work");
+
+    // Merge the branch into main
+    test_repo.git(&["merge", "--no-ff", "merge-test", "-m", "Merge merge-test"]);
+
+    // Verify the worktree exists before remove
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("merge-test"),
+        "merge-test should exist before remove"
+    );
+
+    // Run remove --merged
+    let output = test_repo.agentree(&["remove", "--merged", "main"]);
+    assert!(
+        output.status.success(),
+        "remove --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify the worktree is removed
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("merge-test"),
+        "merge-test should be removed after --merged cleanup"
+    );
 }
