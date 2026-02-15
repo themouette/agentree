@@ -57,7 +57,10 @@ MOCK_RC="$TEST_DIR/.bashrc"
 touch "$MOCK_RC"
 
 # Source color variables and functions
-source <(sed -n '/^# Colors/,/^$/p; /^log_/,/^}/p; /^detect_shell_rc()/,/^}/p; /^add_shell_init()/,/^}/p' install.sh) || {
+# Extract to temp file to avoid broken pipe on macOS
+FUNCTIONS_FILE="$TEST_DIR/functions.sh"
+sed -n '/^# Colors/,/^$/p; /^log_/,/^}/p; /^detect_shell_rc()/,/^}/p; /^add_shell_init()/,/^}/p' install.sh > "$FUNCTIONS_FILE"
+source "$FUNCTIONS_FILE" || {
     run_test fail "Failed to source install script functions"
     echo "Skipping remaining tests"
     exit 1

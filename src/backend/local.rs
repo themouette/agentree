@@ -115,11 +115,8 @@ mod tests {
         assert!(result.is_err());
 
         // The error should NOT be about "does not support"
-        match result {
-            Err(AgentreeError::BackendExecution { error, .. }) => {
-                assert!(!error.contains("does not support agent"));
-            }
-            _ => {}
+        if let Err(AgentreeError::BackendExecution { error, .. }) = result {
+            assert!(!error.contains("does not support agent"));
         }
     }
 }
