@@ -483,3 +483,175 @@ fn test_remove_merged_cleanup() {
         "merge-test should be removed after --merged cleanup"
     );
 }
+
+#[test]
+fn test_exec_autocreates_and_runs_command() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Run exec which should auto-create workspace and run command
+    let output = test_repo.agentree(&["exec", "feat-exec", "--", "echo", "workspace-test"]);
+    assert!(
+        output.status.success(),
+        "exec should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify output contains expected text
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("workspace-test"),
+        "Output should contain 'workspace-test'"
+    );
+
+    // Verify worktree was created
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("feat-exec"),
+        "feat-exec worktree should exist after exec"
+    );
+}
+
+#[test]
+fn test_exec_with_start_ref() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a base branch and add a commit to it
+    test_repo.create_branch("base-branch");
+    test_repo.git(&["checkout", "base-branch"]);
+    test_repo.commit("Base branch commit");
+    test_repo.git(&["checkout", "main"]);
+
+    // Run exec with start_ref
+    let output = test_repo.agentree(&["exec", "new-from-base", "base-branch", "--", "pwd"]);
+    assert!(
+        output.status.success(),
+        "exec with start_ref should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify worktree was created
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("new-from-base"),
+        "new-from-base worktree should exist"
+    );
+}
+
+#[test]
+fn test_exec_existing_workspace() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create workspace first
+    let output = test_repo.agentree(&["create", "existing-ws"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Run exec on existing workspace
+    let output = test_repo.agentree(&["exec", "existing-ws", "--", "echo", "reuse-test"]);
+    assert!(
+        output.status.success(),
+        "exec on existing workspace should succeed"
+    );
+
+    // Verify output
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("reuse-test"),
+        "Output should contain 'reuse-test'"
+    );
+
+    // Should NOT say "Created" (should silently reuse)
+    assert!(
+        !stdout.contains("Created"),
+        "Should not show 'Created' message for existing workspace"
+    );
+}
+
+#[test]
+fn test_exec_requires_command() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Try exec without command (no -- and no command)
+    let output = test_repo.agentree(&["exec", "some-branch"]);
+    assert!(
+        !output.status.success(),
+        "exec should fail without command"
+    );
+
+    // Clap should error about missing required argument
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("required") || stderr.contains("COMMAND"),
+        "Error should mention missing command argument: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_shell_help_shows_args() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+
+    // Run shell --help
+    let output = test_repo.agentree(&["shell", "--help"]);
+    assert!(output.status.success(), "shell --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Branch name"),
+        "Help should mention branch name"
+    );
+    assert!(
+        stdout.contains("START_REF"),
+        "Help should mention START_REF"
+    );
+}
+
+#[test]
+fn test_exec_help_shows_command_separator() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+
+    // Run exec --help
+    let output = test_repo.agentree(&["exec", "--help"]);
+    assert!(output.status.success(), "exec --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("COMMAND"),
+        "Help should mention command"
+    );
+    assert!(
+        stdout.contains("--"),
+        "Help should show -- separator"
+    );
+}
+
+#[test]
+fn test_agent_help_shows_flags() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+
+    // Run agent --help
+    let output = test_repo.agentree(&["agent", "--help"]);
+    assert!(output.status.success(), "agent --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Branch name"),
+        "Help should mention branch name"
+    );
+    assert!(
+        stdout.contains("START_REF"),
+        "Help should mention START_REF"
+    );
+}

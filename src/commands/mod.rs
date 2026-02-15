@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod cd;
 pub mod clean;
 pub mod create;
