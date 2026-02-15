@@ -7,14 +7,16 @@ mod claude;
 mod claude_vm;
 mod exec;
 mod local;
+mod registry;
 
 pub use claude::ClaudeBackend;
 pub use claude_vm::ClaudeVmBackend;
 pub use exec::ExecOutput;
 pub use local::LocalBackend;
+pub use registry::BackendRegistry;
 
 /// Backend selection enum used for config and CLI
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BackendKind {
     Local,
     ClaudeVm,
