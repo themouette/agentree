@@ -34,6 +34,39 @@ pub enum AgentreeError {
 
     #[error("Branch '{branch}' does not exist.\nUse `git branch -a` to see available branches or `agentree create {branch}` to create a new worktree.")]
     BranchNotFound { branch: String },
+
+    #[error("Backend '{backend}' not found. Install it using:\n  {install_instructions}")]
+    BackendBinaryNotFound {
+        backend: String,
+        binary: String,
+        install_instructions: String,
+    },
+
+    #[error("Backend '{backend}' version {current} is too old.\nMinimum required: {minimum}\nUpdate using:\n  {update_instructions}")]
+    BackendVersionTooOld {
+        backend: String,
+        current: String,
+        minimum: String,
+        update_instructions: String,
+    },
+
+    #[error("Backend '{backend}' execution failed: {error}")]
+    BackendExecution { backend: String, error: String },
+
+    #[error("Backend '{backend}' exited with code {exit_code:?}")]
+    BackendFailed {
+        backend: String,
+        exit_code: Option<i32>,
+    },
+
+    #[error("Unknown backend '{name}'. Available backends: {available:?}")]
+    BackendNotFound {
+        name: String,
+        available: Vec<String>,
+    },
+
+    #[error("Failed to parse version '{version}': {error}")]
+    VersionParse { version: String, error: String },
 }
 
 pub type Result<T> = std::result::Result<T, AgentreeError>;
