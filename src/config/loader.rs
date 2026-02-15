@@ -190,7 +190,7 @@ mod tests {
         location = "/project/worktrees"
 
         [backend]
-        default = "claude"
+        default = "local"
         "#;
 
         fs::write(&config_file, toml_content).unwrap();
@@ -202,7 +202,7 @@ mod tests {
         );
         assert_eq!(
             config.backend.default,
-            Some(crate::backend::BackendKind::Claude)
+            Some(crate::backend::BackendKind::Local)
         );
     }
 

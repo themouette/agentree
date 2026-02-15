@@ -42,16 +42,10 @@ impl Backend for LocalBackend {
         run_captured(binary, &args, workspace_path)
     }
 
-    fn agent(&self, workspace_path: &Path, _flags: &[String]) -> Result<()> {
-        // Local backend doesn't support agent mode
-        // Users should use 'claude' or 'claude-vm' backend for AI agent sessions
-        let _ = workspace_path; // Suppress unused warning
-        Err(AgentreeError::BackendExecution {
-            backend: "local".to_string(),
-            error:
-                "Local backend does not support agent command. Use 'claude' or 'claude-vm' backend."
-                    .to_string(),
-        })
+    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
+        // Local backend now supports any agent - just run the binary
+        let flag_refs: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
+        run_interactive(agent, &flag_refs, workspace_path)
     }
 
     fn name(&self) -> &str {
@@ -109,19 +103,23 @@ mod tests {
     }
 
     #[test]
-    fn test_local_backend_agent_not_supported() {
+    fn test_local_backend_agent_supported() {
+        // LocalBackend now supports agent mode by running any agent binary
+        // We can't test actual execution without a real agent binary,
+        // but we can verify the signature is correct
         let backend = LocalBackend::new();
         let temp_dir = TempDir::new().unwrap();
 
-        let result = backend.agent(temp_dir.path(), &[]);
-
+        // Test with non-existent agent should fail (but not with "not supported" error)
+        let result = backend.agent(temp_dir.path(), "nonexistent-agent-binary", &[]);
         assert!(result.is_err());
+
+        // The error should NOT be about "does not support"
         match result {
-            Err(AgentreeError::BackendExecution { backend, error }) => {
-                assert_eq!(backend, "local");
-                assert!(error.contains("does not support agent"));
+            Err(AgentreeError::BackendExecution { error, .. }) => {
+                assert!(!error.contains("does not support agent"));
             }
-            _ => panic!("Expected BackendExecution error"),
+            _ => {}
         }
     }
 }

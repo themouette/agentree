@@ -42,8 +42,11 @@ pub fn execute(args: ExecArgs) -> Result<()> {
     validation::check_submodules_and_warn(&repo_root);
 
     // Load config from files and apply CLI overrides
-    let config = config::load(&repo_root)?
-        .with_cli_overrides(args.backend.as_deref(), args.worktree_location.as_deref())?;
+    let config = config::load(&repo_root)?.with_cli_overrides(
+        args.backend.as_deref(),
+        args.worktree_location.as_deref(),
+        None,
+    )?;
 
     // Auto-create workspace (idempotent - returns Resumed if exists)
     let result = operations::ensure_workspace(

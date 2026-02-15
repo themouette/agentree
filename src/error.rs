@@ -11,6 +11,9 @@ pub enum AgentreeError {
     #[error("Failed to load config from '{path}': {error}")]
     ConfigLoad { path: String, error: String },
 
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

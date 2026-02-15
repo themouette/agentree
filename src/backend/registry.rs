@@ -47,18 +47,6 @@ impl BackendRegistry {
             },
         );
 
-        // Claude backend
-        backends.insert(
-            BackendKind::Claude,
-            BackendInfo {
-                binary_name: "claude".to_string(),
-                min_version: None, // No minimum version requirement yet
-                install_instructions: "Visit https://claude.ai/download to install Claude Code CLI"
-                    .to_string(),
-                update_instructions: "claude update".to_string(),
-            },
-        );
-
         Self { backends }
     }
 
@@ -75,11 +63,7 @@ impl BackendRegistry {
             .get(kind)
             .ok_or_else(|| AgentreeError::BackendNotFound {
                 name: kind.to_string(),
-                available: vec![
-                    "local".to_string(),
-                    "claude-vm".to_string(),
-                    "claude".to_string(),
-                ],
+                available: vec!["local".to_string(), "claude-vm".to_string()],
             })?;
 
         // Check if binary exists in PATH
@@ -136,8 +120,7 @@ mod tests {
         let registry = BackendRegistry::new();
         assert!(registry.backends.contains_key(&BackendKind::Local));
         assert!(registry.backends.contains_key(&BackendKind::ClaudeVm));
-        assert!(registry.backends.contains_key(&BackendKind::Claude));
-        assert_eq!(registry.backends.len(), 3);
+        assert_eq!(registry.backends.len(), 2);
     }
 
     #[test]
@@ -181,34 +164,6 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_claude_missing_binary() {
-        let registry = BackendRegistry::new();
-        // In most test environments, claude won't be installed
-        let result = registry.validate(&BackendKind::Claude);
-
-        // Check if claude is actually installed
-        if which::which("claude").is_err() {
-            // Expected case: binary not found
-            assert!(result.is_err());
-            match result {
-                Err(AgentreeError::BackendBinaryNotFound {
-                    backend,
-                    binary,
-                    install_instructions,
-                }) => {
-                    assert_eq!(backend, "claude");
-                    assert_eq!(binary, "claude");
-                    assert!(install_instructions.contains("claude.ai/download"));
-                }
-                _ => panic!("Expected BackendBinaryNotFound error"),
-            }
-        } else {
-            // Unexpected case: claude is installed in test environment
-            assert!(result.is_ok());
-        }
-    }
-
-    #[test]
     fn test_create_backend_local_succeeds() {
         let registry = BackendRegistry::new();
         let result = registry.create_backend(&BackendKind::Local);
@@ -236,6 +191,6 @@ mod tests {
     #[test]
     fn test_default_trait() {
         let registry = BackendRegistry::default();
-        assert_eq!(registry.backends.len(), 3);
+        assert_eq!(registry.backends.len(), 2);
     }
 }

@@ -40,14 +40,21 @@ impl Backend for ClaudeVmBackend {
         run_host_command(workspace_path, command, self.name())
     }
 
-    fn agent(&self, workspace_path: &Path, flags: &[String]) -> Result<()> {
-        // Build args: ["agent"] + flags
-        let mut args = vec!["agent"];
-        let flag_refs: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
-        args.extend(flag_refs);
+    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
+        // Build args: ["agent"] + optional --agent flag + remaining flags
+        let mut args = vec!["agent".to_string()];
 
-        // Delegate to claude-vm agent command which starts agent in the VM
-        run_interactive(&self.binary, &args, workspace_path)
+        // Add --agent flag if agent binary is specified
+        if !agent.is_empty() {
+            args.push("--agent".to_string());
+            args.push(agent.to_string());
+        }
+
+        // Append remaining flags
+        args.extend_from_slice(flags);
+
+        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        run_interactive(&self.binary, &args_refs, workspace_path)
     }
 
     fn name(&self) -> &str {

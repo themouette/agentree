@@ -22,6 +22,10 @@ pub struct AgentArgs {
     #[arg(long)]
     pub backend: Option<String>,
 
+    /// Agent to use (overrides config)
+    #[arg(long)]
+    pub agent: Option<String>,
+
     /// Worktree location (overrides config)
     #[arg(long = "worktree-location")]
     pub worktree_location: Option<String>,
@@ -42,8 +46,18 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     validation::check_submodules_and_warn(&repo_root);
 
     // Load config from files and apply CLI overrides
-    let config = config::load(&repo_root)?
-        .with_cli_overrides(args.backend.as_deref(), args.worktree_location.as_deref())?;
+    let config = config::load(&repo_root)?.with_cli_overrides(
+        args.backend.as_deref(),
+        args.worktree_location.as_deref(),
+        args.agent.as_deref(),
+    )?;
+
+    // Resolve agent from config (agent name -> binary path + default args)
+    let (agent_bin, default_args) = config.resolve_agent(args.agent.as_deref())?;
+
+    // Combine default_args from config with user-provided flags
+    let mut all_flags = default_args;
+    all_flags.extend(args.flags);
 
     // Auto-create workspace (idempotent - returns Resumed if exists)
     let result = operations::ensure_workspace(
@@ -69,7 +83,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
 
     // Agent respects backend isolation (BACK-09)
     let backend = BackendType::from_kind(config.effective_backend());
-    backend.agent(result.path(), &args.flags)?;
+    backend.agent(result.path(), &agent_bin, &all_flags)?;
 
     Ok(())
 }

@@ -4,13 +4,11 @@ use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 
-mod claude;
 mod claude_vm;
 mod exec;
 mod local;
 mod registry;
 
-pub use claude::ClaudeBackend;
 pub use claude_vm::ClaudeVmBackend;
 pub use exec::{run_host_command, ExecOutput};
 pub use local::LocalBackend;
@@ -22,7 +20,6 @@ pub use registry::BackendRegistry;
 pub enum BackendKind {
     Local,
     ClaudeVm,
-    Claude,
 }
 
 impl fmt::Display for BackendKind {
@@ -30,7 +27,6 @@ impl fmt::Display for BackendKind {
         match self {
             BackendKind::Local => write!(f, "local"),
             BackendKind::ClaudeVm => write!(f, "claude-vm"),
-            BackendKind::Claude => write!(f, "claude"),
         }
     }
 }
@@ -42,14 +38,9 @@ impl FromStr for BackendKind {
         match s.to_lowercase().as_str() {
             "local" => Ok(BackendKind::Local),
             "claude-vm" | "claudevm" => Ok(BackendKind::ClaudeVm),
-            "claude" => Ok(BackendKind::Claude),
             _ => Err(AgentreeError::BackendNotFound {
                 name: s.to_string(),
-                available: vec![
-                    "local".to_string(),
-                    "claude-vm".to_string(),
-                    "claude".to_string(),
-                ],
+                available: vec!["local".to_string(), "claude-vm".to_string()],
             }),
         }
     }
@@ -64,7 +55,12 @@ pub trait Backend {
     fn exec(&self, workspace_path: &Path, command: &[String]) -> Result<ExecOutput>;
 
     /// Start an AI agent session in the workspace
-    fn agent(&self, workspace_path: &Path, flags: &[String]) -> Result<()>;
+    ///
+    /// # Arguments
+    /// * `workspace_path` - Path to the workspace directory
+    /// * `agent` - Binary path of the agent to run (e.g., "claude", "/usr/local/bin/opencode")
+    /// * `flags` - Additional flags to pass to the agent
+    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()>;
 
     /// Get the backend name
     fn name(&self) -> &str;
@@ -74,7 +70,6 @@ pub trait Backend {
 pub enum BackendType {
     Local(LocalBackend),
     ClaudeVm(ClaudeVmBackend),
-    Claude(ClaudeBackend),
 }
 
 impl BackendType {
@@ -88,17 +83,11 @@ impl BackendType {
         BackendType::ClaudeVm(ClaudeVmBackend::new())
     }
 
-    /// Create a new claude backend
-    pub fn claude() -> Self {
-        BackendType::Claude(ClaudeBackend::new())
-    }
-
     /// Create a backend from a BackendKind
     pub fn from_kind(kind: BackendKind) -> Self {
         match kind {
             BackendKind::Local => Self::local(),
             BackendKind::ClaudeVm => Self::claude_vm(),
-            BackendKind::Claude => Self::claude(),
         }
     }
 }
@@ -108,7 +97,6 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.shell(workspace_path),
             BackendType::ClaudeVm(backend) => backend.shell(workspace_path),
-            BackendType::Claude(backend) => backend.shell(workspace_path),
         }
     }
 
@@ -116,15 +104,13 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.exec(workspace_path, command),
             BackendType::ClaudeVm(backend) => backend.exec(workspace_path, command),
-            BackendType::Claude(backend) => backend.exec(workspace_path, command),
         }
     }
 
-    fn agent(&self, workspace_path: &Path, flags: &[String]) -> Result<()> {
+    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
         match self {
-            BackendType::Local(backend) => backend.agent(workspace_path, flags),
-            BackendType::ClaudeVm(backend) => backend.agent(workspace_path, flags),
-            BackendType::Claude(backend) => backend.agent(workspace_path, flags),
+            BackendType::Local(backend) => backend.agent(workspace_path, agent, flags),
+            BackendType::ClaudeVm(backend) => backend.agent(workspace_path, agent, flags),
         }
     }
 
@@ -132,7 +118,6 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.name(),
             BackendType::ClaudeVm(backend) => backend.name(),
-            BackendType::Claude(backend) => backend.name(),
         }
     }
 }
@@ -145,7 +130,6 @@ mod tests {
     fn test_backend_kind_display() {
         assert_eq!(BackendKind::Local.to_string(), "local");
         assert_eq!(BackendKind::ClaudeVm.to_string(), "claude-vm");
-        assert_eq!(BackendKind::Claude.to_string(), "claude");
     }
 
     #[test]
@@ -165,10 +149,6 @@ mod tests {
             BackendKind::from_str("CLAUDE-VM").unwrap(),
             BackendKind::ClaudeVm
         );
-        assert_eq!(
-            BackendKind::from_str("claude").unwrap(),
-            BackendKind::Claude
-        );
     }
 
     #[test]
@@ -178,7 +158,7 @@ mod tests {
         match result {
             Err(AgentreeError::BackendNotFound { name, available }) => {
                 assert_eq!(name, "invalid");
-                assert_eq!(available.len(), 3);
+                assert_eq!(available.len(), 2);
             }
             _ => panic!("Expected BackendNotFound error"),
         }
@@ -194,11 +174,5 @@ mod tests {
     fn test_backend_type_from_kind_claude_vm() {
         let backend = BackendType::from_kind(BackendKind::ClaudeVm);
         assert_eq!(backend.name(), "claude-vm");
-    }
-
-    #[test]
-    fn test_backend_type_from_kind_claude() {
-        let backend = BackendType::from_kind(BackendKind::Claude);
-        assert_eq!(backend.name(), "claude");
     }
 }

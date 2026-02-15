@@ -46,7 +46,35 @@ enum Command {
 }
 
 fn main() {
-    let cli = Cli::parse();
+    // Collect command-line arguments
+    let mut args: Vec<String> = std::env::args().collect();
+
+    // Convenience command routing: agentree <agent-name> <branch> [flags]
+    // Transforms to: agentree agent <branch> --agent <agent-name> [flags]
+    // Supported agent shortcuts: claude, opencode
+    if args.len() >= 2 {
+        let convenience_agents = ["claude", "opencode"];
+
+        if convenience_agents.contains(&args[1].as_str()) {
+            let agent_name = args[1].clone();
+            args.remove(1); // Remove agent name from position 1
+
+            // Insert "agent" subcommand at position 1
+            args.insert(1, "agent".to_string());
+
+            // Find the position to insert --agent flag (before any flag that starts with -)
+            // or at the end if no flags present
+            let flag_pos = args
+                .iter()
+                .position(|a| a.starts_with('-'))
+                .unwrap_or(args.len());
+
+            args.insert(flag_pos, agent_name);
+            args.insert(flag_pos, "--agent".to_string());
+        }
+    }
+
+    let cli = Cli::parse_from(args);
 
     let result = match cli.command {
         Command::Cd(args) => cd::execute(args),

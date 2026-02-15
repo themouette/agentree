@@ -65,24 +65,53 @@ pub struct WorkspaceContext {
 
 ## Backend Implementations
 
-### 1. `claude` Backend (Local)
-- Runs Claude Code directly without isolation
-- Simplest backend - just `cd` to workspace and run `claude`
-- Use case: Trusted code, no isolation needed
+Backends provide **isolation strategies**, not agent implementations. Any agent can run on any backend.
+
+### 1. `local` Backend
+- Runs commands directly on the host without isolation
+- Simplest backend - just `cd` to workspace and execute
+- Supports any agent binary (claude, opencode, custom)
+- Use case: Trusted code, no isolation needed, fast iteration
 
 ### 2. `claude-vm` Backend
 - Delegates to claude-vm CLI for Lima VM isolation
-- Calls out to `claude-vm agent` in workspace directory
+- Calls out to `claude-vm agent --agent <agent-name>` in workspace directory
+- Passes agent selection through to VM
 - Use case: Full system isolation, untrusted code
 
-### 3. `opencode` Backend
-- Similar to claude backend but for OpenCode
-- Integration with OpenCode CLI
-- Use case: OpenCode users who want workspace management
-
-### 4. Future: `docker` Backend
+### 3. Future: `docker` Backend
 - Container-based isolation
 - Use case: Consistent environments, easy to reset
+
+## Agent Configuration
+
+Agents are configured separately from backends. Users specify which AI tool to use:
+
+```toml
+[agent]
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+bin = "opencode"
+default_args = ["--quiet"]
+```
+
+CLI usage:
+```bash
+# Use default agent with local backend
+agentree agent feature-branch
+
+# Use specific agent
+agentree agent feature-branch --agent opencode
+
+# Convenience shortcuts
+agentree claude feature-branch
+agentree opencode feature-branch
+```
 
 ## CLI Interface
 
@@ -153,36 +182,35 @@ root_dir = "../worktrees"
 template = "{repo}-{branch}"
 
 [backend]
-# Default backend: claude, claude-vm, opencode
-default = "claude-vm"
-# Auto-start backend when creating workspace
-auto_start = true
+# Default isolation backend: local, claude-vm
+default = "local"
 
-[backend.claude]
-# Path to claude binary
-binary = "claude"
-# Additional args to pass
-args = []
+[agent]
+# Default agent to use
+default = "claude"
 
-[backend.claude-vm]
-binary = "claude-vm"
-# VM-specific settings passed through
-vm_config = { memory = "8GB", disk = "20GB" }
+[agent.claude]
+bin = "claude"
+default_args = []
 
-[backend.opencode]
-binary = "opencode"
+[agent.opencode]
+bin = "opencode"
+default_args = ["--quiet"]
 ```
 
 ### Global Config (`~/.agentree/config.toml`)
 ```toml
-[defaults]
-backend = "claude-vm"
-workspace_root = "~/workspaces"
+[backend]
+default = "local"
 
-[backends]
-# Override backend binary paths
-claude = "/usr/local/bin/claude"
-claude-vm = "/usr/local/bin/claude-vm"
+[agent]
+default = "claude"
+
+[agent.claude]
+bin = "/usr/local/bin/claude"
+
+[agent.opencode]
+bin = "/usr/local/bin/opencode"
 ```
 
 ## CI and Release Process

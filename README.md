@@ -2,7 +2,7 @@
 
 **Workspace orchestration with pluggable isolation backends**
 
-Manage multiple git branches simultaneously with automatic environment isolation. Choose your backend: local Claude, VM isolation (claude-vm), OpenCode, or containers.
+Manage multiple git branches simultaneously with automatic environment isolation. Choose your backend (local, VM, container) and your AI agent (Claude, OpenCode, etc.).
 
 ## Quick Start
 
@@ -29,27 +29,44 @@ Agentree solves the problem of working on multiple branches simultaneously:
 - **Consistent interface** regardless of isolation mechanism
 
 ```
-┌─────────────────────────────────────────┐
-│           agentree                      │
-│  (workspace + session management)       │
-└───────────┬─────────────────────────────┘
-            │ Backend Trait
-    ┌───────┴────────┬──────────┬─────────┐
-    │                │          │         │
-┌───▼─────┐  ┌──────▼──────┐  ┌▼──────┐  │
-│ claude  │  │  claude-vm  │  │ opencode│ │
-│ (local) │  │  (VM)       │  │         │ │
-└─────────┘  └─────────────┘  └─────────┘ │
+┌────────────────────────────────────────────┐
+│             agentree                       │
+│  (workspace + isolation + agent config)    │
+└────────────┬───────────────────────────────┘
+             │ Backend Trait
+    ┌────────┴─────────┬──────────┐
+    │                  │          │
+┌───▼─────┐    ┌──────▼──────┐  ┌▼────────┐
+│  local  │    │  claude-vm  │  │  docker │
+│         │    │   (VM)      │  │  (TBD)  │
+└─────────┘    └─────────────┘  └─────────┘
+     │                │
+     └────────┬───────┘
+              │ runs any agent
+    ┌─────────┼─────────┬──────────┐
+┌───▼──────┐ │ ┌───────▼────┐ ┌───▼──────┐
+│  claude  │ │ │  opencode  │ │  custom  │
+│  (agent) │ │ │  (agent)   │ │  (agent) │
+└──────────┘ │ └────────────┘ └──────────┘
 ```
 
-## Backends
+## Backends (Isolation Strategy)
 
 | Backend | Isolation | Use Case | Setup |
 |---------|-----------|----------|-------|
-| `claude` | None | Trusted code, fast iteration | Install Claude CLI |
+| `local` | None | Trusted code, fast iteration | No setup required |
 | `claude-vm` | Lima VM | Untrusted code, full isolation | Install [claude-vm](https://github.com/themouette/claude-vm) |
-| `opencode` | None | OpenCode users | Install OpenCode |
 | `docker` | Container | Consistent environments | Install Docker (coming soon) |
+
+## Agents (AI Tools)
+
+Configure which AI agent to use via config or CLI. Any agent can work with any backend:
+
+| Agent | Binary | Setup |
+|-------|--------|-------|
+| `claude` | `claude` | Install [Claude Code CLI](https://claude.com/claude-code) |
+| `opencode` | `opencode` | Install OpenCode |
+| Custom | Any binary | Configure in `.agentree.toml` |
 
 ## Installation
 
@@ -65,13 +82,14 @@ cd agentree
 cargo install --path .
 ```
 
-### Install backends
+### Install backends and agents
 ```bash
-# For VM isolation
+# For VM isolation backend
 brew install themouette/tap/claude-vm
 
-# For local Claude
-# Install Claude CLI from https://claude.com/claude-code
+# For AI agents
+# Claude: Install from https://claude.com/claude-code
+# OpenCode: Follow OpenCode installation instructions
 ```
 
 ## Usage
@@ -107,6 +125,16 @@ agentree shell my-feature
 
 # Execute command in workspace
 agentree exec my-feature -- cargo test
+
+# Start AI agent in workspace
+agentree agent my-feature
+
+# Use specific agent
+agentree agent my-feature --agent opencode
+
+# Convenience shortcut (equivalent to above)
+agentree claude my-feature
+agentree opencode my-feature
 
 # Get workspace path (for scripting)
 cd $(agentree path my-feature)
@@ -147,37 +175,49 @@ root_dir = "../worktrees"
 template = "{repo}-{branch}"
 
 [backend]
-# Default backend for this project
-default = "claude-vm"
-# Auto-start backend when creating workspace
-auto_start = true
+# Default isolation backend
+default = "local"  # or "claude-vm"
 
-[backend.claude-vm]
-# VM-specific settings
-memory = "8GB"
-disk = "20GB"
+[agent]
+# Default AI agent to use
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+bin = "opencode"
+default_args = ["--quiet"]
 ```
 
 ### Global Config (`~/.agentree/config.toml`)
 
 ```toml
-[defaults]
-backend = "claude"
-workspace_root = "~/workspaces"
+[backend]
+default = "local"
 
-[backends]
-claude = "/usr/local/bin/claude"
-claude-vm = "/usr/local/bin/claude-vm"
+[agent]
+default = "claude"
+
+[agent.claude]
+bin = "/usr/local/bin/claude"
+
+[agent.opencode]
+bin = "/usr/local/bin/opencode"
 ```
 
 ### CLI Override
 
 ```bash
-# Always use specific backend
-agentree create feature --backend claude
+# Use specific backend
+agentree create feature --backend claude-vm
+
+# Use specific agent
+agentree agent feature --agent opencode
 
 # Override workspace location
-agentree create feature --workspace-dir ~/my-workspaces
+agentree create feature --worktree-location ~/my-workspaces
 ```
 
 **Precedence**: CLI args > Project config > Global config > Defaults
@@ -232,13 +272,14 @@ See [.claude/BACKEND_SPEC.md](.claude/BACKEND_SPEC.md) for details.
 ### v0.1.0 (Current)
 - ✅ Extract worktree logic from claude-vm
 - ✅ Backend trait definition
-- ✅ `claude` and `claude-vm` backends
-- ✅ Basic commands (create, list, remove)
-- ✅ Config system
+- ✅ `local` and `claude-vm` backends
+- ✅ Agent configuration system
+- ✅ Basic commands (create, list, remove, agent)
+- ✅ Config system with agent support
 - ✅ CI/CD and release automation
 
 ### v0.2.0
-- [ ] `opencode` backend
+- [ ] Agent auto-detection and suggestions
 - [ ] Backend auto-detection and suggestions
 - [ ] Shell completions
 - [ ] Comprehensive error messages
@@ -248,7 +289,7 @@ See [.claude/BACKEND_SPEC.md](.claude/BACKEND_SPEC.md) for details.
 - [ ] `docker` backend
 - [ ] Session/context management
 - [ ] Workspace templates
-- [ ] Plugin system for third-party backends
+- [ ] Plugin system for third-party backends and agents
 
 ## Related Projects
 

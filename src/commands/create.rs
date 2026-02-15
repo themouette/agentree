@@ -41,8 +41,11 @@ pub fn execute(args: CreateArgs) -> Result<()> {
     validation::check_submodules_and_warn(&repo_root);
 
     // Load config from files and apply CLI overrides
-    let config = config::load(&repo_root)?
-        .with_cli_overrides(args.backend.as_deref(), args.worktree_location.as_deref())?;
+    let config = config::load(&repo_root)?.with_cli_overrides(
+        args.backend.as_deref(),
+        args.worktree_location.as_deref(),
+        None,
+    )?;
 
     // Resolve effective base reference (prefer positional arg, fall back to --base flag)
     let effective_base = args.start_ref.or(args.base_alias);
