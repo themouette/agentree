@@ -2,6 +2,30 @@
 
 Agentree uses a hierarchical configuration system with clear precedence rules.
 
+## Shell Completion
+
+Enable tab completion for agentree commands:
+
+```bash
+# Bash
+agentree completion bash >> ~/.bashrc
+source ~/.bashrc
+
+# Zsh
+agentree completion zsh >> ~/.zshrc
+source ~/.zshrc
+
+# Fish
+agentree completion fish > ~/.config/fish/completions/agentree.fish
+```
+
+Once enabled, you can tab-complete:
+- **Commands**: `agentree <TAB>` shows all subcommands
+- **Flags**: `agentree create --<TAB>` shows available flags
+- **Options**: Flag values where applicable
+
+---
+
 ## Configuration Precedence
 
 ```

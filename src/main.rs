@@ -1,6 +1,6 @@
-use agentree::commands::{agent, cd, clean, create, exec, list, remove, shell, shell_init, update};
+use agentree::commands::{agent, cd, clean, completion, create, exec, list, remove, shell, shell_init, update};
 use agentree::version;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use std::process;
 
 #[derive(Parser)]
@@ -22,7 +22,7 @@ EXAMPLES:
     agentree ls --json                   List worktrees in JSON format
     agentree rm --merged main            Remove all merged worktrees
 ")]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     command: Command,
 }
@@ -57,6 +57,9 @@ enum Command {
 
     /// Start AI agent in workspace (auto-creates if needed)
     Agent(agent::AgentArgs),
+
+    /// Generate shell completion script
+    Completion(completion::CompletionArgs),
 
     /// Update agentree to latest or specified version
     Update(update::UpdateArgs),
@@ -103,6 +106,10 @@ fn main() {
         Command::ShellInit(args) => shell_init::execute(args),
         Command::Exec(args) => exec::execute(args),
         Command::Agent(args) => agent::execute(args),
+        Command::Completion(args) => {
+            let mut cmd = Cli::command();
+            completion::execute(args, &mut cmd)
+        }
         Command::Update(args) => update::execute(args),
     };
 
