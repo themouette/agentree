@@ -1,4 +1,4 @@
-use agentree::commands::{clean, create, list, remove};
+use agentree::commands::{cd, clean, create, list, remove};
 use clap::{Parser, Subcommand};
 use std::process;
 
@@ -13,6 +13,9 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print cd command for shell wrapper (use with eval)
+    Cd(cd::CdArgs),
+
     /// Create a worktree for a branch
     Create(create::CreateArgs),
 
@@ -30,6 +33,7 @@ fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
+        Command::Cd(args) => cd::execute(args),
         Command::Create(args) => create::execute(args),
         Command::List(args) => list::execute(args),
         Command::Remove(args) => remove::execute(args),
