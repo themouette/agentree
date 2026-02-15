@@ -638,8 +638,7 @@ mod tests {
 
         // Document the environment variable for users
         assert!(
-            env::var("AGENTREE_GIT_TIMEOUT").is_ok()
-                || env::var("AGENTREE_GIT_TIMEOUT").is_err()
+            env::var("AGENTREE_GIT_TIMEOUT").is_ok() || env::var("AGENTREE_GIT_TIMEOUT").is_err()
         );
     }
 }
