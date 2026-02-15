@@ -35,7 +35,7 @@ fn detect_shell() -> Result<Shell> {
     // Try to detect from parent process or $SHELL
     // First check SHELL env var
     if let Ok(shell_path) = env::var("SHELL") {
-        if let Some(shell_name) = shell_path.split('/').last() {
+        if let Some(shell_name) = shell_path.split('/').next_back() {
             if let Ok(shell) = parse_shell(shell_name) {
                 return Ok(shell);
             }
