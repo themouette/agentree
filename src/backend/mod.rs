@@ -3,9 +3,13 @@ use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
 
+mod claude;
+mod claude_vm;
 mod exec;
 mod local;
 
+pub use claude::ClaudeBackend;
+pub use claude_vm::ClaudeVmBackend;
 pub use exec::ExecOutput;
 pub use local::LocalBackend;
 
@@ -61,8 +65,8 @@ pub trait Backend {
 /// Concrete backend implementation dispatcher
 pub enum BackendType {
     Local(LocalBackend),
-    // TODO: Plan 02 - Add ClaudeVm(ClaudeVmBackend)
-    // TODO: Plan 02 - Add Claude(ClaudeBackend)
+    ClaudeVm(ClaudeVmBackend),
+    Claude(ClaudeBackend),
 }
 
 impl BackendType {
@@ -70,30 +74,57 @@ impl BackendType {
     pub fn local() -> Self {
         BackendType::Local(LocalBackend::new())
     }
+
+    /// Create a new claude-vm backend
+    pub fn claude_vm() -> Self {
+        BackendType::ClaudeVm(ClaudeVmBackend::new())
+    }
+
+    /// Create a new claude backend
+    pub fn claude() -> Self {
+        BackendType::Claude(ClaudeBackend::new())
+    }
+
+    /// Create a backend from a BackendKind
+    pub fn from_kind(kind: BackendKind) -> Self {
+        match kind {
+            BackendKind::Local => Self::local(),
+            BackendKind::ClaudeVm => Self::claude_vm(),
+            BackendKind::Claude => Self::claude(),
+        }
+    }
 }
 
 impl Backend for BackendType {
     fn shell(&self, workspace_path: &Path) -> Result<()> {
         match self {
             BackendType::Local(backend) => backend.shell(workspace_path),
+            BackendType::ClaudeVm(backend) => backend.shell(workspace_path),
+            BackendType::Claude(backend) => backend.shell(workspace_path),
         }
     }
 
     fn exec(&self, workspace_path: &Path, command: &[String]) -> Result<ExecOutput> {
         match self {
             BackendType::Local(backend) => backend.exec(workspace_path, command),
+            BackendType::ClaudeVm(backend) => backend.exec(workspace_path, command),
+            BackendType::Claude(backend) => backend.exec(workspace_path, command),
         }
     }
 
     fn agent(&self, workspace_path: &Path, flags: &[String]) -> Result<()> {
         match self {
             BackendType::Local(backend) => backend.agent(workspace_path, flags),
+            BackendType::ClaudeVm(backend) => backend.agent(workspace_path, flags),
+            BackendType::Claude(backend) => backend.agent(workspace_path, flags),
         }
     }
 
     fn name(&self) -> &str {
         match self {
             BackendType::Local(backend) => backend.name(),
+            BackendType::ClaudeVm(backend) => backend.name(),
+            BackendType::Claude(backend) => backend.name(),
         }
     }
 }
@@ -140,5 +171,23 @@ mod tests {
             }
             _ => panic!("Expected BackendNotFound error"),
         }
+    }
+
+    #[test]
+    fn test_backend_type_from_kind_local() {
+        let backend = BackendType::from_kind(BackendKind::Local);
+        assert_eq!(backend.name(), "local");
+    }
+
+    #[test]
+    fn test_backend_type_from_kind_claude_vm() {
+        let backend = BackendType::from_kind(BackendKind::ClaudeVm);
+        assert_eq!(backend.name(), "claude-vm");
+    }
+
+    #[test]
+    fn test_backend_type_from_kind_claude() {
+        let backend = BackendType::from_kind(BackendKind::Claude);
+        assert_eq!(backend.name(), "claude");
     }
 }
