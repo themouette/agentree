@@ -29,8 +29,52 @@ pub fn execute(args: CdArgs) -> Result<()> {
         })?;
 
     // Print cd command to stdout (for shell eval)
-    // Use single quotes to handle spaces in paths
-    println!("cd '{}'", worktree.path.display());
+    // Use shell_escape to safely escape the path
+    let path_str = worktree.path.to_string_lossy();
+    println!("cd {}", shell_escape(&path_str));
 
     Ok(())
+}
+
+/// Escape a string for safe use in shell commands
+/// Uses single quotes and escapes any embedded single quotes
+fn shell_escape(s: &str) -> String {
+    // If the string is empty, return empty quotes
+    if s.is_empty() {
+        return "''".to_string();
+    }
+
+    // Replace single quotes with '\'' (end quote, escaped quote, start quote)
+    let escaped = s.replace('\'', "'\\''");
+    format!("'{}'", escaped)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shell_escape_simple() {
+        assert_eq!(shell_escape("simple"), "'simple'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_spaces() {
+        assert_eq!(shell_escape("path with spaces"), "'path with spaces'");
+    }
+
+    #[test]
+    fn test_shell_escape_with_single_quote() {
+        assert_eq!(shell_escape("path's test"), "'path'\\''s test'");
+    }
+
+    #[test]
+    fn test_shell_escape_empty() {
+        assert_eq!(shell_escape(""), "''");
+    }
+
+    #[test]
+    fn test_shell_escape_special_chars() {
+        assert_eq!(shell_escape("$PATH & stuff"), "'$PATH & stuff'");
+    }
 }
