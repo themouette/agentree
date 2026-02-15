@@ -33,26 +33,29 @@ fn from_file(path: &Path) -> Result<Config> {
 
 /// Load and merge configuration from global and project config files
 ///
-/// Missing config files are silently skipped. The merge strategy is simple:
+/// Missing config files are silently skipped. The merge strategy is key-by-key:
 /// - Start with default config
-/// - If global config exists, load and replace defaults
-/// - If project config exists, load and replace previous values
+/// - If global config exists, load and merge it (global overrides defaults)
+/// - If project config exists, load and merge it (project overrides global)
 ///
-/// This means project config completely overrides global config (no key-by-key merge yet).
+/// Each config field is merged independently, so setting one field in project config
+/// doesn't clobber other fields from global config.
 pub fn load(repo_root: &Path) -> Result<Config> {
     let mut config = Config::default();
 
-    // Try to load global config
+    // Try to load global config and merge
     if let Some(global_path) = global_config_path() {
         if global_path.exists() {
-            config = from_file(&global_path)?;
+            let global_config = from_file(&global_path)?;
+            config = config.merge(global_config);
         }
     }
 
-    // Try to load project config (overrides global)
+    // Try to load project config and merge (overrides global on a key-by-key basis)
     let project_path = project_config_path(repo_root);
     if project_path.exists() {
-        config = from_file(&project_path)?;
+        let project_config = from_file(&project_path)?;
+        config = config.merge(project_config);
     }
 
     Ok(config)
