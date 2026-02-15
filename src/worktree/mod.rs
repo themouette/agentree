@@ -1,4 +1,5 @@
 pub mod config;
+pub mod metadata;
 pub mod operations;
 pub mod recovery;
 pub mod state;
