@@ -27,3 +27,8 @@ Thumbs.db
 
 # Get shit done
 .planning
+
+
+# Added by cargo
+
+/target
