@@ -50,24 +50,19 @@ cd agentree
 cargo install --path .
 ```
 
-### Shell integration (optional but recommended)
+### Shell integration & completion (optional but recommended)
 
 ```bash
-# Enables `agentree cd <branch>` to change directories
-echo 'eval "$(agentree shell-init)"' >> ~/.bashrc  # or ~/.zshrc
-```
+# One-liner: enables cd command + tab completion for commands and branches!
+echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zshrc
 
-### Shell completion (optional)
+# Or separately:
+# Just cd command: eval "$(agentree shell-init)"
+# Just completion: eval "$(agentree completion bash)"
 
-```bash
-# Add tab completion for commands, flags, and branch names!
-agentree completion bash >> ~/.bashrc  # or save to completion directory
-# For zsh: agentree completion zsh >> ~/.zshrc
-# For fish: agentree completion fish > ~/.config/fish/completions/agentree.fish
-
-# After sourcing, tab completion works:
-# agentree shell <TAB>  → shows your git branches
-# agentree remove <TAB> → shows your git branches
+# After sourcing, you get:
+# - cd command: agentree cd <branch> changes directory
+# - Tab completion: agentree shell <TAB> shows your git branches
 ```
 
 </details>

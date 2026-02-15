@@ -103,7 +103,14 @@ fn main() {
         Command::Remove(args) => remove::execute(args),
         Command::Clean(args) => clean::execute(args),
         Command::Shell(args) => shell::execute(args),
-        Command::ShellInit(args) => shell_init::execute(args),
+        Command::ShellInit(args) => {
+            if args.with_completion {
+                let mut cmd = Cli::command();
+                shell_init::execute(args, Some(&mut cmd))
+            } else {
+                shell_init::execute(args, None)
+            }
+        }
         Command::Exec(args) => exec::execute(args),
         Command::Agent(args) => agent::execute(args),
         Command::Completion(args) => {

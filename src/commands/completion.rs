@@ -59,13 +59,16 @@ _agentree_branch_commands() {
             fi
             ;;
         create)
-            # For create, branch is first arg, base branch might be after --base
-            if [[ "$prev" == "--base" ]] || [[ "$prev" == "-b" ]]; then
-                COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                return 0
-            elif [[ $COMP_CWORD -eq 2 ]]; then
-                # First argument is branch name - no completion (new branch)
+            # For create: <branch> [start_ref]
+            # First arg (position 2) is new branch name - no completion
+            # Second arg (position 3) is start_ref - suggest existing branches
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                # New branch name - no completion
                 COMPREPLY=()
+                return 0
+            elif [[ $COMP_CWORD -eq 3 ]]; then
+                # Start ref - suggest branches
+                COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
                 return 0
             fi
             ;;
@@ -131,8 +134,9 @@ if (( $+functions[_agentree] )); then
                         _agentree_branches
                         ;;
                     create)
-                        # For create command, check if we're after --base
-                        if [[ "$words[CURRENT-1]" == "--base" ]]; then
+                        # For create: <branch> [start_ref]
+                        # Second argument is start_ref - suggest branches
+                        if [[ $#line -eq 2 ]]; then
                             _agentree_branches
                         fi
                         ;;
@@ -168,8 +172,9 @@ complete -c agentree -n "__fish_seen_subcommand_from exec" -a "(__agentree_branc
 complete -c agentree -n "__fish_seen_subcommand_from remove" -a "(__agentree_branches)" -d "Branch"
 complete -c agentree -n "__fish_seen_subcommand_from cd" -a "(__agentree_branches)" -d "Branch"
 
-# For create command, suggest branches after --base flag
-complete -c agentree -n "__fish_seen_subcommand_from create; and __fish_seen_argument -l base" -a "(__agentree_branches)" -d "Base branch"
+# For create command, second argument is start_ref (suggest branches)
+# First argument is new branch name (no suggestions)
+complete -c agentree -n "__fish_seen_subcommand_from create" -a "(__agentree_branches)" -d "Start ref"
 "#;
 
     print!("{}", dynamic_completion);

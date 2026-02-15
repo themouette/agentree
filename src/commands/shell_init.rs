@@ -7,6 +7,10 @@ pub struct ShellInitArgs {
     /// Shell type to generate initialization for (auto-detected if not specified)
     #[arg(long)]
     shell: Option<String>,
+
+    /// Include shell completion in output
+    #[arg(long)]
+    pub with_completion: bool,
 }
 
 #[derive(Debug, PartialEq)]
@@ -16,16 +20,34 @@ enum Shell {
     Fish,
 }
 
-pub fn execute(args: ShellInitArgs) -> Result<()> {
+pub fn execute(args: ShellInitArgs, cmd: Option<&mut clap::Command>) -> Result<()> {
     let shell = if let Some(shell_name) = args.shell {
         parse_shell(&shell_name)?
     } else {
         detect_shell()?
     };
 
+    // Print shell wrapper function
     match shell {
         Shell::Bash | Shell::Zsh => print_posix_function(),
         Shell::Fish => print_fish_function(),
+    }
+
+    // Optionally include completion
+    if args.with_completion {
+        if let Some(cmd) = cmd {
+            println!(); // Blank line separator
+
+            let shell_type = match shell {
+                Shell::Bash => clap_complete::Shell::Bash,
+                Shell::Zsh => clap_complete::Shell::Zsh,
+                Shell::Fish => clap_complete::Shell::Fish,
+            };
+
+            // Generate completion using the completion module
+            let completion_args = super::completion::CompletionArgs { shell: shell_type };
+            super::completion::execute(completion_args, cmd)?;
+        }
     }
 
     Ok(())
