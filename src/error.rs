@@ -11,6 +11,9 @@ pub enum AgentreeError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("JSON serialization error: {0}")]
+    Json(#[from] serde_json::Error),
+
     #[error("Git worktree is locked: {reason}\nTo unlock, run: git worktree unlock {path}")]
     WorktreeLocked { reason: String, path: String },
 

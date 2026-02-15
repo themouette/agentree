@@ -1,0 +1,77 @@
+use crate::error::Result;
+use crate::utils::git::get_git_root;
+use crate::worktree::{operations, recovery, validation};
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+pub struct RemoveArgs {
+    /// Branch names to remove (can specify multiple)
+    #[arg(required_unless_present = "merged")]
+    pub branches: Vec<String>,
+
+    /// Remove all branches merged into BASE
+    #[arg(long, conflicts_with = "branches")]
+    pub merged: Option<String>,
+
+    /// Force removal even with uncommitted changes
+    #[arg(short, long)]
+    pub force: bool,
+}
+
+pub fn execute(args: RemoveArgs) -> Result<()> {
+    // Check git version
+    validation::check_git_version()?;
+
+    // Find repository root
+    let _repo_root = get_git_root()?.ok_or_else(|| {
+        crate::error::AgentreeError::Worktree(
+            "Not in a git repository. Run this command from inside a git repository.".to_string(),
+        )
+    })?;
+
+    // Handle --merged mode
+    if let Some(base) = args.merged {
+        // Get all merged branches
+        let merged_branches = operations::list_merged_branches(&base)?;
+
+        // Get current worktrees
+        let worktrees = recovery::ensure_clean_state()?;
+
+        // Find which merged branches have worktrees
+        let mut removed_count = 0;
+        for branch in merged_branches {
+            let has_worktree = worktrees
+                .iter()
+                .any(|e| e.branch.as_deref() == Some(&branch));
+
+            if has_worktree {
+                match operations::delete_worktree(&branch) {
+                    Ok(_) => {
+                        removed_count += 1;
+                        println!("Removed worktree for branch '{}'", branch);
+                    }
+                    Err(e) => {
+                        eprintln!("Warning: Failed to remove worktree for '{}': {}", branch, e);
+                    }
+                }
+            }
+        }
+
+        println!("Removed {} merged worktrees.", removed_count);
+        return Ok(());
+    }
+
+    // Handle individual branch removal
+    if args.branches.is_empty() {
+        return Err(crate::error::AgentreeError::Worktree(
+            "Specify branches to remove or use --merged <base>".to_string(),
+        ));
+    }
+
+    for branch in &args.branches {
+        operations::delete_worktree(branch)?;
+        println!("Removed worktree for branch '{}'", branch);
+    }
+
+    Ok(())
+}
