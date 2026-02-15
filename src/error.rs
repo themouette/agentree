@@ -8,6 +8,9 @@ pub enum AgentreeError {
     #[error("Config parse error: {0}")]
     ConfigParse(#[from] toml::de::Error),
 
+    #[error("Failed to load config from '{path}': {error}")]
+    ConfigLoad { path: String, error: String },
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

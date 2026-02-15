@@ -96,7 +96,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
             let branch = entry.branch.as_ref().unwrap();
             let path = entry.path.display().to_string();
             let modified = activity
-                .map(|t| operations::format_activity(t))
+                .map(operations::format_activity)
                 .unwrap_or_else(|| "Unknown".to_string());
 
             // Truncate long values

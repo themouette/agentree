@@ -1,4 +1,5 @@
 use crate::error::{AgentreeError, Result};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
 use std::str::FromStr;
@@ -16,7 +17,8 @@ pub use local::LocalBackend;
 pub use registry::BackendRegistry;
 
 /// Backend selection enum used for config and CLI
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum BackendKind {
     Local,
     ClaudeVm,
