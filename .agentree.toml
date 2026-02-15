@@ -1,0 +1,23 @@
+# Agentree configuration for this repository
+
+[workspace]
+# Where to create worktrees (relative to main repo)
+root_dir = "../worktrees"
+# Path template: {repo}, {branch}, {timestamp}
+template = "{repo}-{branch}"
+
+[backend]
+# Default isolation backend
+default = "claude-vm"
+
+[agent]
+# Default agent to use
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+bin = "opencode"
+default_args = ["--quiet"]
