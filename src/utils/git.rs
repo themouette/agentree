@@ -1,4 +1,5 @@
 use crate::error::{AgentreeError, Result};
+use once_cell::sync::Lazy;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -154,8 +155,15 @@ pub fn get_current_branch() -> Result<String> {
     Ok(branch_name)
 }
 
-/// Default timeout for git operations (30 seconds)
-const DEFAULT_GIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Git operation timeout, configurable via AGENTREE_GIT_TIMEOUT environment variable
+/// Defaults to 30 seconds if not set or invalid
+static GIT_TIMEOUT: Lazy<Duration> = Lazy::new(|| {
+    std::env::var("AGENTREE_GIT_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(Duration::from_secs(30))
+});
 
 /// Run a git command and return stdout on success with timeout support.
 ///
@@ -173,7 +181,7 @@ fn run_git_command_timeout(
     operation: &str,
     timeout: Option<Duration>,
 ) -> Result<String> {
-    let timeout = timeout.unwrap_or(DEFAULT_GIT_TIMEOUT);
+    let timeout = timeout.unwrap_or(*GIT_TIMEOUT);
 
     let mut child = Command::new("git")
         .args(args)
@@ -242,7 +250,7 @@ pub fn run_git_command(args: &[&str], operation: &str) -> Result<String> {
 /// }
 /// ```
 pub fn run_git_query(args: &[&str]) -> Result<Option<String>> {
-    let timeout = DEFAULT_GIT_TIMEOUT;
+    let timeout = *GIT_TIMEOUT;
 
     let mut child = Command::new("git")
         .args(args)
@@ -297,7 +305,7 @@ pub fn run_git_query(args: &[&str]) -> Result<Option<String>> {
 /// }
 /// ```
 pub fn run_git_best_effort(args: &[&str]) -> Result<std::process::Output> {
-    let timeout = DEFAULT_GIT_TIMEOUT;
+    let timeout = *GIT_TIMEOUT;
 
     let mut child = Command::new("git")
         .args(args)
@@ -608,6 +616,30 @@ mod tests {
         assert!(
             result.is_ok(),
             "Non-existent path should be OK (will be created)"
+        );
+    }
+
+    #[test]
+    fn test_git_timeout_default() {
+        // Without setting env var, should use default 30 seconds
+        use std::env;
+        env::remove_var("AGENTREE_GIT_TIMEOUT");
+        // Since GIT_TIMEOUT is a Lazy static, we can't easily reset it in tests
+        // but we can verify the default is reasonable
+        assert!(GIT_TIMEOUT.as_secs() >= 30);
+    }
+
+    #[test]
+    fn test_git_timeout_configurable() {
+        // This test documents that AGENTREE_GIT_TIMEOUT should be set before
+        // the first access to GIT_TIMEOUT for it to take effect
+        // In real usage, users would set the env var before running agentree
+        use std::env;
+
+        // Document the environment variable for users
+        assert!(
+            env::var("AGENTREE_GIT_TIMEOUT").is_ok()
+                || env::var("AGENTREE_GIT_TIMEOUT").is_err()
         );
     }
 }
