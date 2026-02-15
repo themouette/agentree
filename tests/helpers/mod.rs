@@ -5,7 +5,8 @@ use tempfile::TempDir;
 
 /// Test repository helper
 pub struct TestRepo {
-    temp_dir: TempDir,
+    #[allow(dead_code)]
+    temp_dir: TempDir, // Kept alive to prevent temp directory cleanup
     repo_path: PathBuf,
 }
 
@@ -23,6 +24,8 @@ impl TestRepo {
         self.git(&["init"]);
         self.git(&["config", "user.email", "test@example.com"]);
         self.git(&["config", "user.name", "Test User"]);
+        // Ensure we're on main branch for consistency
+        self.git(&["checkout", "-b", "main"]);
     }
 
     /// Create a commit
@@ -86,5 +89,10 @@ impl TestRepo {
     /// Get the repository path
     pub fn path(&self) -> &Path {
         &self.repo_path
+    }
+
+    /// Get the expected worktrees directory path
+    pub fn worktrees_dir(&self) -> PathBuf {
+        self.repo_path.parent().unwrap().join("worktrees")
     }
 }
