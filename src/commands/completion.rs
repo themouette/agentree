@@ -52,25 +52,49 @@ _agentree_branch_commands() {
     # Commands that take branch as first argument
     case "$cmd" in
         shell|agent|exec|remove|cd)
-            # If we're at the position for branch name (after the command)
-            if [[ $COMP_CWORD -eq 2 ]] || [[ "$prev" == "$cmd" ]]; then
-                COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                return 0
-            fi
+            # Check if previous word is the command itself or a flag that expects a value
+            # This handles: agentree shell <branch> and agentree shell --flag value <branch>
+            case "$prev" in
+                "$cmd")
+                    # Directly after command - suggest branches
+                    COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
+                    return 0
+                    ;;
+                --backend|--agent)
+                    # After a flag that expects a value - let default completion handle it
+                    return 1
+                    ;;
+                *)
+                    # Check if we're likely at a branch position (not a flag)
+                    if [[ "$cur" != -* ]] && [[ "$prev" != -* ]]; then
+                        COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
+                        return 0
+                    fi
+                    ;;
+            esac
             ;;
         create)
             # For create: <branch> [start_ref]
-            # First arg (position 2) is new branch name - no completion
-            # Second arg (position 3) is start_ref - suggest existing branches
-            if [[ $COMP_CWORD -eq 2 ]]; then
-                # New branch name - no completion
-                COMPREPLY=()
-                return 0
-            elif [[ $COMP_CWORD -eq 3 ]]; then
-                # Start ref - suggest branches
-                COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                return 0
-            fi
+            # Context-aware: check what the previous word was instead of position
+            case "$prev" in
+                create)
+                    # Directly after 'create' - new branch name (no completion)
+                    COMPREPLY=()
+                    return 0
+                    ;;
+                --backend|--agent)
+                    # After a flag - let default completion handle it
+                    return 1
+                    ;;
+                *)
+                    # If previous word is not a flag and current word is not a flag,
+                    # we're likely at the start_ref position - suggest branches
+                    if [[ "$cur" != -* ]] && [[ "$prev" != -* ]] && [[ "$prev" != "$cmd" ]]; then
+                        COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
+                        return 0
+                    fi
+                    ;;
+            esac
             ;;
     esac
 
