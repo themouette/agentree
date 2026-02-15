@@ -4,7 +4,7 @@ Agentree uses a hierarchical configuration system with clear precedence rules.
 
 ## Shell Completion
 
-Enable tab completion for agentree commands:
+Enable tab completion for agentree commands with **dynamic branch suggestions**:
 
 ```bash
 # Bash
@@ -19,10 +19,36 @@ source ~/.zshrc
 agentree completion fish > ~/.config/fish/completions/agentree.fish
 ```
 
+### What Gets Completed
+
 Once enabled, you can tab-complete:
-- **Commands**: `agentree <TAB>` shows all subcommands
-- **Flags**: `agentree create --<TAB>` shows available flags
-- **Options**: Flag values where applicable
+
+**Static Completions:**
+- **Commands**: `agentree <TAB>` shows all subcommands (create, list, shell, agent, etc.)
+- **Flags**: `agentree create --<TAB>` shows available flags (--backend, --base, etc.)
+- **Aliases**: `ls` and `rm` aliases work
+
+**Dynamic Completions:**
+- **Branch names**: `agentree shell <TAB>` shows your actual git branches
+- **Commands with branches**: Works for `shell`, `agent`, `exec`, `remove`, `cd`
+- **Base branches**: `agentree create new --base <TAB>` shows branches
+
+### Example
+
+```bash
+# In a git repository with branches: main, feature-auth, hotfix-bug
+
+$ agentree shell <TAB>
+feature-auth    hotfix-bug    main
+
+$ agentree remove <TAB>
+feature-auth    hotfix-bug    main
+
+$ agentree create new-feature --base <TAB>
+feature-auth    hotfix-bug    main
+```
+
+**Note**: Dynamic branch completion only works when you're inside a git repository. Outside git repos, you get static completions only.
 
 ---
 

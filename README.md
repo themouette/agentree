@@ -60,10 +60,14 @@ echo 'eval "$(agentree shell-init)"' >> ~/.bashrc  # or ~/.zshrc
 ### Shell completion (optional)
 
 ```bash
-# Add tab completion for commands and flags
+# Add tab completion for commands, flags, and branch names!
 agentree completion bash >> ~/.bashrc  # or save to completion directory
 # For zsh: agentree completion zsh >> ~/.zshrc
 # For fish: agentree completion fish > ~/.config/fish/completions/agentree.fish
+
+# After sourcing, tab completion works:
+# agentree shell <TAB>  → shows your git branches
+# agentree remove <TAB> → shows your git branches
 ```
 
 </details>
