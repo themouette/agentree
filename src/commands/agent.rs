@@ -1,4 +1,4 @@
-use crate::backend::{Backend, BackendType};
+use crate::backend::{Backend, BackendKind, BackendType};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::{get_git_root, validate_workspace_path};
@@ -22,7 +22,7 @@ pub struct AgentArgs {
     #[arg(long)]
     pub backend: Option<String>,
 
-    /// Agent to use (overrides config)
+    /// Agent to use (overrides config). Required for 'local' backend, optional for 'claude-vm'
     #[arg(long)]
     pub agent: Option<String>,
 
@@ -52,8 +52,28 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         args.agent.as_deref(),
     )?;
 
-    // Resolve agent from config (agent name -> binary path + default args)
-    let (agent_bin, default_args) = config.resolve_agent(args.agent.as_deref())?;
+    // Determine which backend we're using
+    let backend_kind = config.effective_backend();
+
+    // Resolve agent based on backend requirements:
+    // - local backend: agent is required
+    // - claude-vm backend: agent is optional (claude-vm can handle agent selection)
+    let (agent_bin, default_args) = match backend_kind {
+        BackendKind::Local => {
+            // Local backend requires an agent
+            config.resolve_agent(args.agent.as_deref())?
+        }
+        BackendKind::ClaudeVm => {
+            // Claude-vm backend: agent is optional
+            if args.agent.is_some() {
+                // User explicitly specified an agent, resolve it
+                config.resolve_agent(args.agent.as_deref())?
+            } else {
+                // No agent specified, let claude-vm handle it
+                (String::new(), vec![])
+            }
+        }
+    };
 
     // Combine default_args from config with user-provided flags
     let mut all_flags = default_args;
