@@ -1,0 +1,22 @@
+# Isolated configuration using VM backend
+# For working with untrusted code or requiring full system isolation
+
+[workspace]
+# Standard workspace location
+location = "../worktrees"
+template = "{repo}/{branch}"
+
+[backend]
+# Use VM isolation by default
+# Requires: brew install themouette/tap/claude-vm
+default = "claude-vm"
+
+[agent]
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+# Note: With claude-vm backend, ensure your workspace location is mounted in the VM
+# See: https://github.com/themouette/claude-vm for VM configuration

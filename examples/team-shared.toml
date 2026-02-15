@@ -1,0 +1,31 @@
+# Team-shared configuration
+# Place this as .agentree.toml in your repository root
+# Check into git so all team members get consistent settings
+
+[workspace]
+# Shared workspace location for the team
+location = "../workspaces"
+
+# Include repo name to avoid collisions if multiple projects use same base dir
+template = "{repo}/{branch}"
+
+[backend]
+# Default to local for fast iteration
+# Team members can override in their global config if they prefer isolation
+default = "local"
+
+[agent]
+# Team standard: use Claude by default
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+# Alternative agent (some team members prefer this)
+bin = "opencode"
+default_args = ["--quiet"]
+
+# Note: Team members can override these in their personal global config:
+# ~/.config/agentree/config.toml

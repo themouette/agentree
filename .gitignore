@@ -26,4 +26,8 @@ Thumbs.db
 *.zip
 
 # Get shit done
-.planning
+.planning/
+
+# Added by cargo
+
+/target

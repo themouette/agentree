@@ -1,276 +1,274 @@
 # Agentree
 
-**Workspace orchestration with pluggable isolation backends**
+**Worktree management for the AI era**
 
-Manage multiple git branches simultaneously with automatic environment isolation. Choose your backend: local Claude, VM isolation (claude-vm), OpenCode, or containers.
+Agentree manages multiple git branches simultaneously with automatic environment isolation. Work on a feature branch, hotfix, and experiment in parallel - each in its own isolated workspace.
 
-## Quick Start
+## What Does It Do?
 
-```bash
-# Create a new workspace with VM isolation
-agentree create feature-branch --backend claude-vm
+Agentree combines:
 
-# List all workspaces
-agentree list
-
-# Open shell in workspace
-agentree shell feature-branch
-
-# Remove workspace when done
-agentree remove feature-branch
-```
-
-## What is Agentree?
-
-Agentree solves the problem of working on multiple branches simultaneously:
-- **Git worktrees** for separate working directories per branch
-- **Isolation backends** to prevent cross-contamination between workspaces
-- **One command** to create workspace + start environment
-- **Consistent interface** regardless of isolation mechanism
+- **Git worktrees** - Separate working directories for each branch
+- **Isolation backends** - Choose your isolation level (none, VM, sandbox)
+- **Agent management** - Work with any AI coding assistant
 
 ```
-┌─────────────────────────────────────────┐
-│           agentree                      │
-│  (workspace + session management)       │
-└───────────┬─────────────────────────────┘
-            │ Backend Trait
-    ┌───────┴────────┬──────────┬─────────┐
-    │                │          │         │
-┌───▼─────┐  ┌──────▼──────┐  ┌▼──────┐  │
-│ claude  │  │  claude-vm  │  │ opencode│ │
-│ (local) │  │  (VM)       │  │         │ │
-└─────────┘  └─────────────┘  └─────────┘ │
+main repo          ┌─> feature-auth (isolated)
+  ├─ src/          │   ├─ src/
+  ├─ tests/        │   ├─ tests/
+  └─ README.md     │   └─ README.md
+                   │
+                   ├─> hotfix-bug (isolated)
+                   │   ├─ src/
+                   │   └─ tests/
+                   │
+                   └─> experiment (isolated)
 ```
-
-## Backends
-
-| Backend | Isolation | Use Case | Setup |
-|---------|-----------|----------|-------|
-| `claude` | None | Trusted code, fast iteration | Install Claude CLI |
-| `claude-vm` | Lima VM | Untrusted code, full isolation | Install [claude-vm](https://github.com/themouette/claude-vm) |
-| `opencode` | None | OpenCode users | Install OpenCode |
-| `docker` | Container | Consistent environments | Install Docker (coming soon) |
 
 ## Installation
 
+**One-line install** (macOS/Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh | bash
+```
+
+<details>
+<summary>Other installation methods</summary>
+
 ### Homebrew (macOS)
+
 ```bash
 brew install themouette/tap/agentree
 ```
 
 ### From source
+
 ```bash
 git clone https://github.com/themouette/agentree
 cd agentree
 cargo install --path .
 ```
 
-### Install backends
-```bash
-# For VM isolation
-brew install themouette/tap/claude-vm
+### Shell integration & completion (optional but recommended)
 
-# For local Claude
-# Install Claude CLI from https://claude.com/claude-code
+```bash
+# One-liner: enables cd command + tab completion for commands and branches!
+echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zshrc
+
+# Or separately:
+# Just cd command: eval "$(agentree shell-init)"
+# Just completion: eval "$(agentree completion bash)"
+
+# After sourcing, you get:
+# - cd command: agentree cd <branch> changes directory
+# - Tab completion: agentree shell <TAB> shows your git branches
 ```
 
-## Usage
+</details>
 
-### Create Workspace
+## Quick Start
+
+### Typical Workflow
 
 ```bash
-# Create with explicit backend
-agentree create my-feature --backend claude-vm
+# 1. Start working on a feature
+agentree agent feature-auth
 
-# Create with auto-detected backend
-agentree create my-feature
+# Your workspace is auto-created if it doesn't exist!
+# Now you're in an isolated environment with your AI agent
 
-# Create from base branch
-agentree create my-feature --base develop
+# 2. See all your workspaces
+agentree list
+
+# Output:
+# BRANCH         PATH                              BACKEND  CREATED
+# main           /Users/me/myproject              -        (main)
+# feature-auth   ../worktrees/myproject/feature   local    2024-01-15
+
+# 3. Done with work? Clean up merged branches
+agentree remove --merged main
+
+# Removes all branches that have been merged into main
 ```
 
-### List Workspaces
+### Common Commands
 
 ```bash
-$ agentree list
-BRANCH         PATH                           BACKEND     STATUS
-main           /Users/me/myproject           -           (main repo)
-my-feature     ../worktrees/project-feature  claude-vm   Running
-hotfix         ../worktrees/project-hotfix   claude      (local)
-```
+# Start AI agent in a workspace (creates if needed)
+agentree agent <branch>
+agentree claude <branch>       # Shortcut for Claude
+agentree opencode <branch>     # Shortcut for OpenCode
 
-### Work in Workspace
+# List all workspaces
+agentree list
+agentree ls                    # Alias
 
-```bash
+# Remove workspace(s)
+agentree remove <branch>
+agentree rm feature-*          # Supports wildcards
+
 # Open shell in workspace
-agentree shell my-feature
+agentree shell <branch>
 
 # Execute command in workspace
-agentree exec my-feature -- cargo test
+agentree exec <branch> -- npm test
 
-# Get workspace path (for scripting)
-cd $(agentree path my-feature)
-```
+# Go to workspace directory
+agentree cd <branch>
 
-### Remove Workspace
-
-```bash
-# Remove specific workspace
-agentree remove my-feature
-
-# Remove all merged workspaces
+# Remove merged branches (cleanup)
 agentree remove --merged main
 ```
 
-### Backend Control
+## Backends (Isolation Levels)
+
+Choose your isolation strategy:
+
+| Backend          | Isolation          | Use Case                              | Setup                                                        |
+| ---------------- | ------------------ | ------------------------------------- | ------------------------------------------------------------ |
+| `local`          | None               | Trusted code, fast iteration          | ✅ Built-in (default)                                        |
+| `claude-vm`      | Lima VM            | Untrusted code, full system isolation | Install [claude-vm](https://github.com/themouette/claude-vm) |
+| `docker sandbox` | Use Docker sandbox | Coming soon                           | -                                                            |
+
+**Set backend per workspace:**
 
 ```bash
-# Start backend for workspace
-agentree start my-feature
+agentree create feature --backend claude-vm
+```
 
-# Stop backend
-agentree stop my-feature
+**Or configure default** in `.agentree.toml`:
 
-# Check status
-agentree status
+```toml
+[backend]
+default = "claude-vm"
+```
+
+## Agents (AI Tools)
+
+Any AI agent can work with any backend:
+
+```bash
+# Use Claude
+agentree claude feature-branch
+
+# Use OpenCode
+agentree opencode feature-branch
+
+# Use custom agent
+agentree agent feature-branch --agent my-custom-agent
+```
+
+Configure agents in `.agentree.toml`:
+
+```toml
+[agent]
+default = "claude"
+
+[agent.opencode]
+bin = "opencode"
+default_args = ["--quiet"]
 ```
 
 ## Configuration
 
-### Per-Project Config (`.agentree.toml`)
+Create `.agentree.toml` in your project:
 
 ```toml
 [workspace]
-# Where to create worktrees (relative to repo)
-root_dir = "../worktrees"
-# Path template
-template = "{repo}-{branch}"
+# Where to create worktrees (relative to repo root)
+location = "../worktrees"
+# Path template: {repo}, {branch}, {user}, {date}, {short_hash}
+template = "{repo}/{branch}"
 
 [backend]
-# Default backend for this project
-default = "claude-vm"
-# Auto-start backend when creating workspace
-auto_start = true
+default = "local"  # or "claude-vm"
 
-[backend.claude-vm]
-# VM-specific settings
-memory = "8GB"
-disk = "20GB"
+[agent]
+default = "claude"
 ```
 
-### Global Config (`~/.agentree/config.toml`)
-
-```toml
-[defaults]
-backend = "claude"
-workspace_root = "~/workspaces"
-
-[backends]
-claude = "/usr/local/bin/claude"
-claude-vm = "/usr/local/bin/claude-vm"
-```
-
-### CLI Override
-
-```bash
-# Always use specific backend
-agentree create feature --backend claude
-
-# Override workspace location
-agentree create feature --workspace-dir ~/my-workspaces
-```
-
-**Precedence**: CLI args > Project config > Global config > Defaults
-
-## Architecture
-
-See [PROJECT.md](PROJECT.md) for detailed architecture and design decisions.
-
-**Key concepts**:
-- **Workspace management** (agentree) is separate from **isolation** (backends)
-- **Backend trait** defines standard interface for isolation providers
-- Backends are **external CLIs** (not linked libraries) for independence
-- **Git worktrees** provide the foundation for multiple working directories
-
-## Development
-
-### Setup
-```bash
-# Clone with claude-vm reference for extraction
-git clone https://github.com/themouette/agentree
-cd agentree
-
-# Build
-cargo build
-
-# Test
-cargo test
-
-# Run locally
-cargo run -- --help
-```
-
-### Adding a Backend
-
-1. Create `src/backend/{name}.rs`
-2. Implement `Backend` trait
-3. Register in `src/backend/mod.rs`
-4. Add tests
-5. Document in `docs/backends/{name}.md`
-
-See [.claude/BACKEND_SPEC.md](.claude/BACKEND_SPEC.md) for details.
+See [docs/configuration.md](docs/configuration.md) for all options.
 
 ## Documentation
 
-- [PROJECT.md](PROJECT.md) - Vision, architecture, and roadmap
-- [.claude/CLAUDE.md](.claude/CLAUDE.md) - Comprehensive development guide
-- [.claude/EXTRACTION_GUIDE.md](.claude/EXTRACTION_GUIDE.md) - How code was extracted from claude-vm
-- [.claude/BACKEND_SPEC.md](.claude/BACKEND_SPEC.md) - Backend trait specification
+- **[Configuration Guide](docs/configuration.md)** - All configuration options
+- **[Development Guide](docs/development.md)** - Contributing and architecture
+- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
 
-## Roadmap
+## Why Agentree?
 
-### v0.1.0 (Current)
-- ✅ Extract worktree logic from claude-vm
-- ✅ Backend trait definition
-- ✅ `claude` and `claude-vm` backends
-- ✅ Basic commands (create, list, remove)
-- ✅ Config system
-- ✅ CI/CD and release automation
+**Problem**: Working on multiple branches means either:
 
-### v0.2.0
-- [ ] `opencode` backend
-- [ ] Backend auto-detection and suggestions
-- [ ] Shell completions
-- [ ] Comprehensive error messages
-- [ ] User guide and tutorials
+- Constant `git stash` + `git checkout` (slow, error-prone)
+- Multiple clones (wastes disk space, out-of-sync remotes)
 
-### v1.0.0
-- [ ] `docker` backend
-- [ ] Session/context management
-- [ ] Workspace templates
-- [ ] Plugin system for third-party backends
+**Solution**: Git worktrees give you multiple working directories, but managing them manually is tedious. Agentree automates:
 
-## Related Projects
+- ✅ Worktree creation with proper path management
+- ✅ Backend isolation (VM, container, or none)
+- ✅ Agent integration (Claude, OpenCode, etc.)
+- ✅ Cleanup of merged/stale branches
 
-- [claude-vm](https://github.com/themouette/claude-vm) - Lima VM isolation for Claude Code
-- [Claude Code](https://claude.com/claude-code) - CLI agent from Anthropic
-- [OpenCode](https://opencode.com) - Open source code assistant
+## Examples
+
+### Feature Development
+
+```bash
+# Start new feature from main
+agentree claude feature-auth main
+
+# Work on it...
+# (agentree auto-creates workspace from main branch)
+
+# When done, clean up
+git checkout main
+git pull
+agentree remove --merged main  # Removes feature-auth if merged
+```
+
+### Multiple Branches
+
+```bash
+# Work on feature
+agentree shell feature-auth
+
+# Switch to hotfix (in another terminal)
+agentree shell hotfix-bug
+
+# Check status of all
+agentree list
+```
+
+### Custom Workflow
+
+```bash
+# Create workspace without starting agent
+agentree create experiment
+
+# Run tests in that workspace
+agentree exec experiment -- cargo test
+
+# Open shell to investigate
+agentree shell experiment
+
+# Remove when done
+agentree remove experiment
+```
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
+We welcome contributions! See [docs/development.md](docs/development.md) for:
 
-**Quick links**:
-- [Issues](https://github.com/themouette/agentree/issues)
-- [Pull Requests](https://github.com/themouette/agentree/pulls)
-- [Discussions](https://github.com/themouette/agentree/discussions)
+- Development setup
+- Architecture overview
+- Adding new backends
+- Testing guidelines
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Credits
+## Related Projects
 
-Agentree was created to separate workspace orchestration from isolation implementation, building on proven worktree patterns from the claude-vm project.
-
-The backend abstraction enables the broader ecosystem to integrate isolation tools (VMs, containers, etc.) with a consistent workflow.
+- [claude-vm](https://github.com/themouette/claude-vm) - Lima VM isolation for AI agents
