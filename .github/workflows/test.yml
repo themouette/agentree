@@ -55,6 +55,11 @@ jobs:
       - name: Check formatting
         run: cargo fmt -- --check
 
+      - name: Test shell integration
+        run: |
+          chmod +x test_shell_integration.sh
+          ./test_shell_integration.sh
+
   security-audit:
     name: Security Audit
     runs-on: ubuntu-latest

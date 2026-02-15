@@ -46,6 +46,9 @@ OPTIONS:
     --global                   Install to /usr/local/bin (requires sudo)
                                Default is ~/.local/bin (no sudo required)
 
+    --shell-integration        Add 'eval "\$(agentree shell-init)"' to shell rc file
+                               Enables cd command to change directory
+
     --help                     Show this help message
 
 EXAMPLES:
@@ -119,12 +122,65 @@ check_path() {
   fi
 }
 
+# Detect shell type and rc file
+detect_shell_rc() {
+  local shell_name=$(basename "$SHELL")
+
+  case "$shell_name" in
+    bash)
+      echo "$HOME/.bashrc"
+      ;;
+    zsh)
+      echo "$HOME/.zshrc"
+      ;;
+    fish)
+      echo "$HOME/.config/fish/config.fish"
+      ;;
+    *)
+      echo ""
+      ;;
+  esac
+}
+
+# Add shell initialization to rc file
+add_shell_init() {
+  local rc_file="$1"
+
+  if [ -z "$rc_file" ]; then
+    log_warning "Could not detect shell RC file"
+    echo ""
+    echo "To enable cd command integration, add this to your shell configuration:"
+    echo ""
+    echo '  eval "$(agentree shell-init)"'
+    echo ""
+    return 1
+  fi
+
+  # Check if already installed
+  if [ -f "$rc_file" ] && grep -q "agentree shell-init" "$rc_file" 2>/dev/null; then
+    log_info "Shell integration already installed in $rc_file"
+    return 0
+  fi
+
+  # Create RC file directory if it doesn't exist (for fish)
+  mkdir -p "$(dirname "$rc_file")" 2>/dev/null
+
+  # Add initialization line
+  echo "" >> "$rc_file"
+  echo "# agentree shell integration" >> "$rc_file"
+  echo 'eval "$(agentree shell-init)"' >> "$rc_file"
+
+  log_success "Shell integration added to $rc_file"
+  return 0
+}
+
 # Download and install
 install_agentree() {
   local platform=$(detect_platform)
   local version="latest"
   local install_dir="$HOME/.local/bin"
   local use_global=false
+  local shell_integration=false
 
   # Parse arguments
   while [[ $# -gt 0 ]]; do
@@ -140,6 +196,10 @@ install_agentree() {
       --global)
         use_global=true
         install_dir="/usr/local/bin"
+        shift
+        ;;
+      --shell-integration)
+        shell_integration=true
         shift
         ;;
       --help)
@@ -207,6 +267,27 @@ install_agentree() {
     echo "Add this to your shell configuration file (~/.bashrc, ~/.zshrc, etc.):"
     echo ""
     echo "  export PATH=\"${install_dir}:\$PATH\""
+    echo ""
+  fi
+
+  # Shell integration
+  if [ "$shell_integration" = true ]; then
+    log_info "Installing shell integration..."
+    local rc_file=$(detect_shell_rc)
+
+    if add_shell_init "$rc_file"; then
+      log_success "Shell integration installed"
+      log_info "Restart your shell or run: source $rc_file"
+    fi
+  else
+    log_info "Shell integration not installed (optional)"
+    echo ""
+    echo "To enable cd command integration, add this to your shell configuration:"
+    echo ""
+    echo '  eval "$(agentree shell-init)"'
+    echo ""
+    echo "Or run the installer with --shell-integration:"
+    echo "  curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh | bash -s -- --shell-integration"
     echo ""
   fi
 
