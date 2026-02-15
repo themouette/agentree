@@ -1,0 +1,10 @@
+[tools]
+gpg = true
+git = true
+gh = true
+rust = true
+node = true
+
+[[mounts]]
+location = "/Users/julien.muetton/Projects/themouette/claude-vm"
+writable = true
