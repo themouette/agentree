@@ -101,7 +101,10 @@ pub fn execute(args: ListArgs) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&json_output)?);
     } else {
         // Table output
-        println!("{:<20} {:<40} {:<12} {:<16} {:<20}", "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED");
+        println!(
+            "{:<20} {:<40} {:<12} {:<16} {:<20}",
+            "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED"
+        );
 
         for (entry, activity) in worktrees_with_time {
             let branch = entry.branch.as_ref().unwrap();
@@ -109,11 +112,13 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
             // Load metadata for backend and created info
             let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
-            let backend = metadata.as_ref()
+            let backend = metadata
+                .as_ref()
                 .map(|m| m.backend.as_str())
                 .unwrap_or("unknown");
 
-            let created = metadata.as_ref()
+            let created = metadata
+                .as_ref()
                 .and_then(|m| {
                     // Parse ISO 8601 and format as YYYY-MM-DD HH:MM
                     use chrono::DateTime;
@@ -146,7 +151,10 @@ pub fn execute(args: ListArgs) -> Result<()> {
                 backend.to_string()
             };
 
-            println!("{:<20} {:<40} {:<12} {:<16} {:<20}", branch_display, path_display, backend_display, created, modified);
+            println!(
+                "{:<20} {:<40} {:<12} {:<16} {:<20}",
+                branch_display, path_display, backend_display, created, modified
+            );
         }
     }
 

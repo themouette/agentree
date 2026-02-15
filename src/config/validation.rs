@@ -118,9 +118,7 @@ mod tests {
         assert_eq!(errors.len(), 0);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("does not exist"));
-        assert!(warnings[0]
-            .message
-            .contains("/tmp/nonexistent-path-12345"));
+        assert!(warnings[0].message.contains("/tmp/nonexistent-path-12345"));
     }
 
     #[test]

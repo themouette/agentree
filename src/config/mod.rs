@@ -139,10 +139,7 @@ mod tests {
         "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(
-            config.worktree.location,
-            Some("/tmp/worktrees".to_string())
-        );
+        assert_eq!(config.worktree.location, Some("/tmp/worktrees".to_string()));
         assert_eq!(config.worktree.template, "{repo}/{branch}");
         assert_eq!(config.backend.default, None);
     }
@@ -339,7 +336,10 @@ mod tests {
         default = default.merge(project);
 
         assert_eq!(default.backend.default, Some(BackendKind::ClaudeVm));
-        assert_eq!(default.worktree.location, Some("/project/worktrees".to_string()));
+        assert_eq!(
+            default.worktree.location,
+            Some("/project/worktrees".to_string())
+        );
         assert_eq!(default.worktree.template, "{branch}"); // Still from global
 
         // CLI overrides backend and location
@@ -348,7 +348,10 @@ mod tests {
         let final_config = result.unwrap();
 
         assert_eq!(final_config.backend.default, Some(BackendKind::Local));
-        assert_eq!(final_config.worktree.location, Some("/cli/worktrees".to_string()));
+        assert_eq!(
+            final_config.worktree.location,
+            Some("/cli/worktrees".to_string())
+        );
         assert_eq!(final_config.worktree.template, "{branch}"); // Still from global
     }
 }

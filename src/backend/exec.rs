@@ -182,9 +182,15 @@ mod tests {
 
     #[test]
     fn test_extract_version() {
-        assert_eq!(extract_version("git version 2.39.1"), Some("2.39.1".to_string()));
+        assert_eq!(
+            extract_version("git version 2.39.1"),
+            Some("2.39.1".to_string())
+        );
         assert_eq!(extract_version("v1.2.3"), Some("1.2.3".to_string()));
-        assert_eq!(extract_version("version 10.20.30"), Some("10.20.30".to_string()));
+        assert_eq!(
+            extract_version("version 10.20.30"),
+            Some("10.20.30".to_string())
+        );
         assert_eq!(extract_version("1.2.3-beta"), Some("1.2.3".to_string()));
         assert_eq!(extract_version("no version here"), None);
         assert_eq!(extract_version("1.2"), None); // Not enough dots

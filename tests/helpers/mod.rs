@@ -16,7 +16,10 @@ impl TestRepo {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let repo_path = temp_dir.path().to_path_buf();
 
-        Self { temp_dir, repo_path }
+        Self {
+            temp_dir,
+            repo_path,
+        }
     }
 
     /// Initialize git repository

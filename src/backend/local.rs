@@ -48,7 +48,9 @@ impl Backend for LocalBackend {
         let _ = workspace_path; // Suppress unused warning
         Err(AgentreeError::BackendExecution {
             backend: "local".to_string(),
-            error: "Local backend does not support agent command. Use 'claude' or 'claude-vm' backend.".to_string(),
+            error:
+                "Local backend does not support agent command. Use 'claude' or 'claude-vm' backend."
+                    .to_string(),
         })
     }
 

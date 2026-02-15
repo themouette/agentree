@@ -18,12 +18,11 @@ pub fn project_config_path(repo_root: &Path) -> PathBuf {
 
 /// Load config from a specific file
 fn from_file(path: &Path) -> Result<Config> {
-    let contents = fs::read_to_string(path).map_err(|e| {
-        crate::error::AgentreeError::ConfigLoad {
+    let contents =
+        fs::read_to_string(path).map_err(|e| crate::error::AgentreeError::ConfigLoad {
             path: path.display().to_string(),
             error: e.to_string(),
-        }
-    })?;
+        })?;
 
     toml::from_str(&contents).map_err(|e| crate::error::AgentreeError::ConfigLoad {
         path: path.display().to_string(),
@@ -118,10 +117,7 @@ mod tests {
         fs::write(&config_file, toml_content).unwrap();
 
         let config = from_file(&config_file).unwrap();
-        assert_eq!(
-            config.worktree.location,
-            Some("/tmp/worktrees".to_string())
-        );
+        assert_eq!(config.worktree.location, Some("/tmp/worktrees".to_string()));
         assert_eq!(config.worktree.template, "{branch}");
         assert_eq!(
             config.backend.default,

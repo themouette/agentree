@@ -29,7 +29,9 @@ pub enum AgentreeError {
     #[error("Git worktree error: {0}")]
     Worktree(String),
 
-    #[error("No worktree found for branch '{branch}'.\nUse `agentree list` to see available worktrees.")]
+    #[error(
+        "No worktree found for branch '{branch}'.\nUse `agentree list` to see available worktrees."
+    )]
     WorktreeNotFound { branch: String },
 
     #[error("Worktree path escapes base directory: {path}\nThis is a security risk. Check your configuration.")]
@@ -39,10 +41,7 @@ pub enum AgentreeError {
     BranchNotFound { branch: String },
 
     #[error("Branch '{branch}' not found. Did you mean: {suggestions}?\nUse `git branch -a` to see available branches.")]
-    BranchNotFoundWithSuggestions {
-        branch: String,
-        suggestions: String,
-    },
+    BranchNotFoundWithSuggestions { branch: String, suggestions: String },
 
     #[error("Workspace path '{}' is not accessible: {reason}\n{hint}", path.display())]
     PathNotAccessible {
@@ -83,6 +82,17 @@ pub enum AgentreeError {
 
     #[error("Failed to parse version '{version}': {error}")]
     VersionParse { version: String, error: String },
+
+    #[error("Update failed: {0}")]
+    UpdateError(String),
+
+    #[error(
+        "Permission denied: {0}\nHint: Try running with sudo if binary is in system directory"
+    )]
+    PermissionDenied(String),
+
+    #[error("Failed to check for updates: {0}")]
+    UpdateCheckFailed(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentreeError>;

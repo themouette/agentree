@@ -53,8 +53,8 @@ impl BackendRegistry {
             BackendInfo {
                 binary_name: "claude".to_string(),
                 min_version: None, // No minimum version requirement yet
-                install_instructions:
-                    "Visit https://claude.ai/download to install Claude Code CLI".to_string(),
+                install_instructions: "Visit https://claude.ai/download to install Claude Code CLI"
+                    .to_string(),
                 update_instructions: "claude update".to_string(),
             },
         );
@@ -75,7 +75,11 @@ impl BackendRegistry {
             .get(kind)
             .ok_or_else(|| AgentreeError::BackendNotFound {
                 name: kind.to_string(),
-                available: vec!["local".to_string(), "claude-vm".to_string(), "claude".to_string()],
+                available: vec![
+                    "local".to_string(),
+                    "claude-vm".to_string(),
+                    "claude".to_string(),
+                ],
             })?;
 
         // Check if binary exists in PATH
@@ -90,12 +94,11 @@ impl BackendRegistry {
         // Check version requirement if specified
         if let Some(ref min_version) = info.min_version {
             let version_str = get_binary_version(&info.binary_name, "--version")?;
-            let version = semver::Version::parse(&version_str).map_err(|e| {
-                AgentreeError::VersionParse {
+            let version =
+                semver::Version::parse(&version_str).map_err(|e| AgentreeError::VersionParse {
                     version: version_str.clone(),
                     error: e.to_string(),
-                }
-            })?;
+                })?;
 
             if !min_version.matches(&version) {
                 return Err(AgentreeError::BackendVersionTooOld {
@@ -163,8 +166,10 @@ mod tests {
                 }) => {
                     assert_eq!(backend, "claude-vm");
                     assert_eq!(binary, "claude-vm");
-                    assert!(install_instructions.contains("brew install")
-                        || install_instructions.contains("cargo install"));
+                    assert!(
+                        install_instructions.contains("brew install")
+                            || install_instructions.contains("cargo install")
+                    );
                 }
                 _ => panic!("Expected BackendBinaryNotFound error"),
             }

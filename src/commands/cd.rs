@@ -14,9 +14,8 @@ pub fn execute(args: CdArgs) -> Result<()> {
     validation::check_git_version()?;
 
     // Get repo root (verify we're in a git repository)
-    let _repo_root = get_git_root()?.ok_or_else(|| {
-        AgentreeError::Git("Not in a git repository".to_string())
-    })?;
+    let _repo_root =
+        get_git_root()?.ok_or_else(|| AgentreeError::Git("Not in a git repository".to_string()))?;
 
     // Get worktrees with cleanup
     let worktrees = recovery::ensure_clean_state()?;

@@ -35,10 +35,10 @@ impl WorktreeMetadata {
         if git_path.is_file() {
             // Worktree case: .git is a file containing "gitdir: /path/to/gitdir"
             let content = fs::read_to_string(&git_path).map_err(|e| {
-                AgentreeError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to read .git file: {}", e),
-                ))
+                AgentreeError::Io(std::io::Error::other(format!(
+                    "Failed to read .git file: {}",
+                    e
+                )))
             })?;
 
             // Parse gitdir path from file
@@ -170,7 +170,12 @@ mod tests {
     #[test]
     fn test_save_and_load_worktree() {
         let temp_dir = TempDir::new().unwrap();
-        let gitdir = temp_dir.path().join("main").join(".git").join("worktrees").join("branch");
+        let gitdir = temp_dir
+            .path()
+            .join("main")
+            .join(".git")
+            .join("worktrees")
+            .join("branch");
         fs::create_dir_all(&gitdir).unwrap();
 
         let worktree_dir = temp_dir.path().join("worktree");
@@ -201,7 +206,11 @@ mod tests {
     #[test]
     fn test_metadata_path_resolves_correctly() {
         let temp_dir = TempDir::new().unwrap();
-        let gitdir = temp_dir.path().join(".git").join("worktrees").join("feature");
+        let gitdir = temp_dir
+            .path()
+            .join(".git")
+            .join("worktrees")
+            .join("feature");
         fs::create_dir_all(&gitdir).unwrap();
 
         let worktree_dir = temp_dir.path().join("feature-worktree");

@@ -45,7 +45,11 @@ impl FromStr for BackendKind {
             "claude" => Ok(BackendKind::Claude),
             _ => Err(AgentreeError::BackendNotFound {
                 name: s.to_string(),
-                available: vec!["local".to_string(), "claude-vm".to_string(), "claude".to_string()],
+                available: vec![
+                    "local".to_string(),
+                    "claude-vm".to_string(),
+                    "claude".to_string(),
+                ],
             }),
         }
     }
@@ -161,7 +165,10 @@ mod tests {
             BackendKind::from_str("CLAUDE-VM").unwrap(),
             BackendKind::ClaudeVm
         );
-        assert_eq!(BackendKind::from_str("claude").unwrap(), BackendKind::Claude);
+        assert_eq!(
+            BackendKind::from_str("claude").unwrap(),
+            BackendKind::Claude
+        );
     }
 
     #[test]
