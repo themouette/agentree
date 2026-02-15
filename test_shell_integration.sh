@@ -56,8 +56,8 @@ info "Test 2: Testing RC file modification"
 MOCK_RC="$TEST_DIR/.bashrc"
 touch "$MOCK_RC"
 
-# Source functions
-source <(sed -n '/^log_/,/^}/p; /^detect_shell_rc()/,/^}/p; /^add_shell_init()/,/^}/p' install.sh) || {
+# Source color variables and functions
+source <(sed -n '/^# Colors/,/^$/p; /^log_/,/^}/p; /^detect_shell_rc()/,/^}/p; /^add_shell_init()/,/^}/p' install.sh) || {
     run_test fail "Failed to source install script functions"
     echo "Skipping remaining tests"
     exit 1
