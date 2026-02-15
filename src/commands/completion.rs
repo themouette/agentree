@@ -79,8 +79,9 @@ _agentree_branch_commands() {
 
 # Wrap the original completion function
 if declare -F _agentree > /dev/null; then
-    _agentree_orig=$(declare -f _agentree)
-    eval "${_agentree_orig/_agentree/_agentree_static}"
+    # Rename function by replacing only the function declaration line
+    # Using sed to avoid replacing _agentree in function body
+    eval "$(declare -f _agentree | sed '1s/_agentree/_agentree_static/')"
 
     _agentree() {
         # Try dynamic completion first
