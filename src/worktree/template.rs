@@ -89,10 +89,24 @@ pub fn compute_worktree_path(
     };
 
     let expanded_template = context.expand(&config.template);
+
+    // Early validation: reject obviously dangerous patterns in the expanded template
+    // This provides defense-in-depth even if base_dir doesn't exist yet
+    if expanded_template.contains("..") {
+        return Err(crate::error::AgentreeError::WorktreePathTraversal {
+            path: format!("{} (contains '..')", expanded_template),
+        });
+    }
+    if expanded_template.starts_with('/') || expanded_template.starts_with('\\') {
+        return Err(crate::error::AgentreeError::WorktreePathTraversal {
+            path: format!("{} (absolute path)", expanded_template),
+        });
+    }
+
     let final_path = base_dir.join(&expanded_template);
 
-    // Canonicalize both paths and verify final_path is under base_dir
-    // Only do this check if base_dir exists; if it doesn't exist yet, we can't canonicalize
+    // If base_dir exists, perform full canonicalization-based validation
+    // This catches symlink-based path traversal attacks
     if base_dir.exists() {
         let canonical_base = base_dir.canonicalize().map_err(|e| {
             crate::error::AgentreeError::Worktree(format!(
@@ -101,7 +115,7 @@ pub fn compute_worktree_path(
             ))
         })?;
 
-        // For non-existent final_path, check parent directory
+        // For non-existent final_path, construct expected canonical path
         let check_path = if final_path.exists() {
             final_path.canonicalize().map_err(|e| {
                 crate::error::AgentreeError::Worktree(format!(
@@ -110,14 +124,6 @@ pub fn compute_worktree_path(
                 ))
             })?
         } else {
-            // Check that parent would be under base_dir
-            // We can't canonicalize a non-existent path, so we check the expanded template
-            // doesn't try to escape with ".."
-            if expanded_template.contains("..") || expanded_template.starts_with('/') {
-                return Err(crate::error::AgentreeError::WorktreePathTraversal {
-                    path: final_path.display().to_string(),
-                });
-            }
             // Construct the check path from the canonical base to handle symlinks correctly
             // (e.g., on macOS where /var -> /private/var)
             canonical_base.join(&expanded_template)
@@ -129,14 +135,10 @@ pub fn compute_worktree_path(
                 path: final_path.display().to_string(),
             });
         }
-    } else {
-        // Base dir doesn't exist yet - do basic check on expanded template
-        if expanded_template.contains("..") || expanded_template.starts_with('/') {
-            return Err(crate::error::AgentreeError::WorktreePathTraversal {
-                path: final_path.display().to_string(),
-            });
-        }
     }
+    // If base_dir doesn't exist, the early string-based checks above provide
+    // basic protection. Full validation will occur when base_dir is created
+    // and this function is called again during actual worktree creation.
 
     Ok(final_path)
 }
