@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 mod loader;
+pub mod validation;
 
 pub use loader::{global_config_path, load, project_config_path};
 
@@ -98,6 +99,15 @@ impl Config {
     /// (default config, global config, project config, or CLI).
     pub fn effective_backend(&self) -> BackendKind {
         self.backend.default.unwrap_or(BackendKind::Local)
+    }
+
+    /// Validate configuration and return warnings and errors.
+    ///
+    /// Returns (warnings, errors) tuple where:
+    /// - Warnings are non-fatal issues (e.g., path doesn't exist yet)
+    /// - Errors are fatal issues that prevent using the config
+    pub fn validate(&self) -> (Vec<validation::ConfigWarning>, Vec<String>) {
+        validation::validate(self)
     }
 }
 

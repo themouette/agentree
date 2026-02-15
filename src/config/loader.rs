@@ -40,6 +40,9 @@ fn from_file(path: &Path) -> Result<Config> {
 ///
 /// Each config field is merged independently, so setting one field in project config
 /// doesn't clobber other fields from global config.
+///
+/// After loading, the config is validated. Warnings are emitted to stderr, and errors
+/// cause the function to return an error.
 pub fn load(repo_root: &Path) -> Result<Config> {
     let mut config = Config::default();
 
@@ -56,6 +59,22 @@ pub fn load(repo_root: &Path) -> Result<Config> {
     if project_path.exists() {
         let project_config = from_file(&project_path)?;
         config = config.merge(project_config);
+    }
+
+    // Validate the merged config
+    let (warnings, errors) = config.validate();
+
+    // Emit warnings to stderr
+    for warning in warnings {
+        eprintln!("Warning: {}", warning.message);
+    }
+
+    // If there are errors, return the first one
+    if let Some(error) = errors.first() {
+        return Err(crate::error::AgentreeError::ConfigLoad {
+            path: "config".to_string(),
+            error: error.clone(),
+        });
     }
 
     Ok(config)
@@ -209,5 +228,54 @@ mod tests {
             }
             _ => panic!("Expected ConfigLoad error"),
         }
+    }
+
+    #[test]
+    fn test_load_with_invalid_toml_produces_config_load_error_with_file_path() {
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path();
+        let config_file = project_config_path(repo_root);
+
+        // Write invalid TOML
+        let invalid_toml = r#"
+        [worktree]
+        location = "unclosed string
+        "#;
+        fs::write(&config_file, invalid_toml).unwrap();
+
+        let result = load(repo_root);
+        assert!(result.is_err());
+
+        match result {
+            Err(crate::error::AgentreeError::ConfigLoad { path, error }) => {
+                assert!(path.contains("agentree.toml"));
+                assert!(!error.is_empty());
+            }
+            _ => panic!("Expected ConfigLoad error"),
+        }
+    }
+
+    #[test]
+    fn test_load_with_valid_config_nonexistent_location_succeeds_with_warning() {
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path();
+        let config_file = project_config_path(repo_root);
+
+        // Write valid config with nonexistent location
+        let toml_content = r#"
+        [worktree]
+        location = "/tmp/nonexistent-worktree-path-54321"
+        "#;
+        fs::write(&config_file, toml_content).unwrap();
+
+        // Should succeed (warnings are emitted to stderr, not errors)
+        let result = load(repo_root);
+        assert!(result.is_ok());
+
+        let config = result.unwrap();
+        assert_eq!(
+            config.worktree.location,
+            Some("/tmp/nonexistent-worktree-path-54321".to_string())
+        );
     }
 }
