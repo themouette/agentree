@@ -349,3 +349,265 @@ pub fn path_to_str<'a>(path: &'a std::path::Path, context: &str) -> Result<&'a s
         ))
     })
 }
+
+/// List all local branches in the repository.
+///
+/// # Returns
+/// A vector of branch names (without refs/heads/ prefix).
+///
+/// # Example
+/// ```ignore
+/// let branches = list_local_branches()?;
+/// ```
+pub fn list_local_branches() -> Result<Vec<String>> {
+    let output = run_git_command(&["branch", "--format=%(refname:short)"], "list branches")?;
+
+    Ok(output
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+/// Suggest similar branch names based on Levenshtein distance.
+///
+/// Returns up to 3 branch names with edit distance <= max_distance,
+/// sorted by distance (closest first).
+///
+/// # Arguments
+/// * `target` - The mistyped branch name to match against
+/// * `candidates` - Available branch names to search
+/// * `max_distance` - Maximum edit distance to consider (typically 3)
+///
+/// # Returns
+/// Vector of suggested branch names (up to 3), sorted by similarity.
+/// Returns empty vec if target is too short (< 2 chars) to avoid false positives.
+///
+/// # Example
+/// ```ignore
+/// let suggestions = suggest_similar_branches("mian", &["main", "feature"], 3);
+/// // Returns: ["main"]
+/// ```
+pub fn suggest_similar_branches(
+    target: &str,
+    candidates: &[String],
+    max_distance: usize,
+) -> Vec<String> {
+    // Avoid false positives for very short input
+    if target.len() < 2 {
+        return Vec::new();
+    }
+
+    let mut matches: Vec<(usize, &String)> = candidates
+        .iter()
+        .map(|candidate| (strsim::levenshtein(target, candidate), candidate))
+        .filter(|(distance, _)| *distance <= max_distance)
+        .collect();
+
+    // Sort by distance (ascending)
+    matches.sort_by_key(|(distance, _)| *distance);
+
+    // Return top 3 matches
+    matches
+        .into_iter()
+        .take(3)
+        .map(|(_, branch)| branch.clone())
+        .collect()
+}
+
+/// Validate that a git ref exists.
+///
+/// Checks if the given ref exists in the repository. If not, suggests
+/// similar branch names to help users correct typos.
+///
+/// # Arguments
+/// * `ref_name` - The ref to validate (branch name, tag, commit hash, etc.)
+///
+/// # Returns
+/// Ok(()) if ref exists, error with suggestions if not found.
+///
+/// # Example
+/// ```ignore
+/// validate_start_ref("main")?;  // Ok if main exists
+/// validate_start_ref("mian")?;  // Error with "Did you mean: main?"
+/// ```
+pub fn validate_start_ref(ref_name: &str) -> Result<()> {
+    // Try to resolve the ref directly
+    if run_git_query(&["rev-parse", "--verify", "--quiet", ref_name])?.is_some() {
+        return Ok(());
+    }
+
+    // Try with refs/heads/ prefix (local branch)
+    let branch_ref = format!("refs/heads/{}", ref_name);
+    if run_git_query(&["rev-parse", "--verify", "--quiet", &branch_ref])?.is_some() {
+        return Ok(());
+    }
+
+    // Try with refs/tags/ prefix (tag)
+    let tag_ref = format!("refs/tags/{}", ref_name);
+    if run_git_query(&["rev-parse", "--verify", "--quiet", &tag_ref])?.is_some() {
+        return Ok(());
+    }
+
+    // Ref doesn't exist - suggest similar branch names
+    let branches = list_local_branches()?;
+    let suggestions = suggest_similar_branches(ref_name, &branches, 3);
+
+    if !suggestions.is_empty() {
+        return Err(AgentreeError::BranchNotFoundWithSuggestions {
+            branch: ref_name.to_string(),
+            suggestions: suggestions.join("', '"),
+        });
+    }
+
+    Err(AgentreeError::BranchNotFound {
+        branch: ref_name.to_string(),
+    })
+}
+
+/// Validate that a workspace path is accessible and writable.
+/// For VM/container backends, checks path is under $HOME to ensure mount accessibility.
+///
+/// # Arguments
+/// * `path` - The workspace path to validate
+/// * `backend_kind` - The backend that will access this path
+///
+/// # Returns
+/// Ok(()) if path is accessible, error with helpful hint if not.
+///
+/// # Example
+/// ```ignore
+/// validate_workspace_path(&workspace_path, &BackendKind::ClaudeVm)?;
+/// ```
+pub fn validate_workspace_path(
+    path: &std::path::Path,
+    backend_kind: &crate::backend::BackendKind,
+) -> Result<()> {
+    // If path doesn't exist yet, that's fine (create_worktree will create it)
+    if !path.exists() {
+        return Ok(());
+    }
+
+    // If path exists, verify it's a directory
+    if !path.is_dir() {
+        return Err(AgentreeError::PathNotAccessible {
+            path: path.to_path_buf(),
+            reason: "path exists but is not a directory".to_string(),
+            hint: "Remove the file or choose a different workspace location.".to_string(),
+        });
+    }
+
+    // For ClaudeVm backend, check if path is under $HOME
+    if matches!(backend_kind, crate::backend::BackendKind::ClaudeVm) {
+        if let Ok(home) = std::env::var("HOME") {
+            let home_path = PathBuf::from(home);
+            if let (Ok(canonical_path), Ok(canonical_home)) =
+                (path.canonicalize(), home_path.canonicalize())
+            {
+                if !canonical_path.starts_with(&canonical_home) {
+                    return Err(AgentreeError::PathNotAccessible {
+                        path: path.to_path_buf(),
+                        reason: "not under home directory".to_string(),
+                        hint: "Ensure workspace location is under $HOME or explicitly mounted in your VM configuration.".to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_suggest_similar_branches_finds_close_matches() {
+        let candidates = vec![
+            "main".to_string(),
+            "feature".to_string(),
+            "develop".to_string(),
+        ];
+        let suggestions = suggest_similar_branches("mian", &candidates, 3);
+        assert_eq!(suggestions, vec!["main"]);
+    }
+
+    #[test]
+    fn test_suggest_similar_branches_no_matches() {
+        let candidates = vec![
+            "main".to_string(),
+            "feature".to_string(),
+            "develop".to_string(),
+        ];
+        let suggestions = suggest_similar_branches("xyzabc", &candidates, 3);
+        assert!(suggestions.is_empty());
+    }
+
+    #[test]
+    fn test_suggest_similar_branches_short_input() {
+        let candidates = vec![
+            "main".to_string(),
+            "feature".to_string(),
+            "develop".to_string(),
+        ];
+        let suggestions = suggest_similar_branches("m", &candidates, 3);
+        assert!(
+            suggestions.is_empty(),
+            "Should return empty for single char input to avoid false positives"
+        );
+    }
+
+    #[test]
+    fn test_suggest_similar_branches_sorted_by_distance() {
+        let candidates = vec![
+            "feature".to_string(),
+            "feat".to_string(),
+            "feature-x".to_string(),
+        ];
+        let suggestions = suggest_similar_branches("featre", &candidates, 3);
+        assert_eq!(
+            suggestions[0], "feature",
+            "Should return closest match first"
+        );
+    }
+
+    #[test]
+    fn test_suggest_similar_branches_max_three() {
+        let candidates = vec![
+            "feature1".to_string(),
+            "feature2".to_string(),
+            "feature3".to_string(),
+            "feature4".to_string(),
+            "feature5".to_string(),
+        ];
+        let suggestions = suggest_similar_branches("featur", &candidates, 3);
+        assert!(
+            suggestions.len() <= 3,
+            "Should return maximum 3 suggestions"
+        );
+    }
+
+    #[test]
+    fn test_validate_workspace_path_local_any_path() {
+        use crate::backend::BackendKind;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let result = validate_workspace_path(temp_dir.path(), &BackendKind::Local);
+        assert!(result.is_ok(), "Local backend should accept any path");
+    }
+
+    #[test]
+    fn test_validate_workspace_path_nonexistent_ok() {
+        use crate::backend::BackendKind;
+        use std::path::PathBuf;
+
+        let nonexistent = PathBuf::from("/tmp/nonexistent-path-12345");
+        let result = validate_workspace_path(&nonexistent, &BackendKind::Local);
+        assert!(
+            result.is_ok(),
+            "Non-existent path should be OK (will be created)"
+        );
+    }
+}

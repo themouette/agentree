@@ -38,6 +38,19 @@ pub enum AgentreeError {
     #[error("Branch '{branch}' does not exist.\nUse `git branch -a` to see available branches or `agentree create {branch}` to create a new worktree.")]
     BranchNotFound { branch: String },
 
+    #[error("Branch '{branch}' not found. Did you mean: {suggestions}?\nUse `git branch -a` to see available branches.")]
+    BranchNotFoundWithSuggestions {
+        branch: String,
+        suggestions: String,
+    },
+
+    #[error("Workspace path '{}' is not accessible: {reason}\n{hint}", path.display())]
+    PathNotAccessible {
+        path: std::path::PathBuf,
+        reason: String,
+        hint: String,
+    },
+
     #[error("Backend '{backend}' not found. Install it using:\n  {install_instructions}")]
     BackendBinaryNotFound {
         backend: String,
