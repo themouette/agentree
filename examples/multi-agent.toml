@@ -1,0 +1,48 @@
+# Multi-agent configuration
+# Demonstrates configuring multiple AI agents
+
+[workspace]
+location = "../worktrees"
+template = "{repo}/{branch}"
+
+[backend]
+default = "local"
+
+[agent]
+# Default agent
+default = "claude"
+
+[agent.claude]
+# Claude Code CLI
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+# OpenCode CLI
+bin = "opencode"
+default_args = ["--quiet"]
+
+[agent.claude-experimental]
+# Beta version of Claude for testing
+bin = "/opt/claude-beta/bin/claude"
+default_args = ["--experimental"]
+
+[agent.copilot]
+# GitHub Copilot CLI (example - adjust for actual CLI)
+bin = "copilot"
+default_args = []
+
+[agent.custom-gpt4]
+# Custom agent using GPT-4
+bin = "~/bin/custom-agent"
+default_args = ["--model", "gpt-4", "--temperature", "0.7"]
+
+# Usage:
+# agentree agent feature --agent claude          # Use Claude
+# agentree agent feature --agent opencode        # Use OpenCode
+# agentree agent feature --agent claude-experimental  # Use beta Claude
+# agentree agent feature --agent custom-gpt4     # Use custom agent
+#
+# Or use shortcuts:
+# agentree claude feature        # Shortcut for --agent claude
+# agentree opencode feature      # Shortcut for --agent opencode

@@ -1,0 +1,32 @@
+# Basic agentree configuration
+# Place this as .agentree.toml in your repository root
+
+[workspace]
+# Where to create worktrees (relative to repository root)
+# Default: "../worktrees"
+location = "../worktrees"
+
+# Path template for worktree subdirectories
+# Variables: {repo}, {branch}, {user}, {date}, {short_hash}
+# Default: "{repo}/{branch}"
+template = "{repo}/{branch}"
+
+[backend]
+# Default isolation backend: "local" or "claude-vm"
+# Default: "local"
+default = "local"
+
+[agent]
+# Default AI agent to use
+# Default: "claude"
+default = "claude"
+
+[agent.claude]
+# Claude Code CLI binary
+bin = "claude"
+default_args = []
+
+[agent.opencode]
+# OpenCode CLI binary
+bin = "opencode"
+default_args = ["--quiet"]

@@ -1,0 +1,31 @@
+# Global personal configuration
+# Place this at: ~/.config/agentree/config.toml
+# These are your personal preferences across all projects
+
+[backend]
+# Your preferred backend (overrides project defaults)
+default = "claude-vm"
+
+[agent]
+# Your preferred agent
+default = "claude"
+
+[agent.claude]
+# Your custom Claude installation path
+bin = "/opt/homebrew/bin/claude"
+default_args = []
+
+[agent.opencode]
+# Custom OpenCode setup
+bin = "/usr/local/bin/opencode"
+default_args = ["--quiet", "--no-telemetry"]
+
+[agent.custom]
+# Your custom agent
+bin = "~/bin/my-custom-agent"
+default_args = ["--model", "gpt-4"]
+
+# Note: This config applies to all projects
+# Project-specific .agentree.toml files can override workspace settings
+# but your global agent/backend preferences take precedence unless
+# overridden via CLI arguments

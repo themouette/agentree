@@ -1,0 +1,36 @@
+# Custom workspace paths configuration
+# Demonstrates different path templates and locations
+
+[workspace]
+# Use home directory for workspaces (good for shared/multi-user systems)
+location = "~/workspaces"
+
+# Include user and date in path for experiments
+# Useful when multiple users share a workspace location
+template = "{user}/{repo}/{branch}-{date}"
+
+# Example result: ~/workspaces/alice/myproject/feature-auth-2024-01-15
+
+[backend]
+default = "local"
+
+[agent]
+default = "claude"
+
+[agent.claude]
+bin = "claude"
+default_args = []
+
+# Alternative templates:
+#
+# Simple flat structure:
+# template = "{branch}"
+# Result: ~/workspaces/feature-auth
+#
+# Group by repo only:
+# template = "{repo}/{branch}"
+# Result: ~/workspaces/myproject/feature-auth
+#
+# With git hash for experiments:
+# template = "{repo}/{branch}-{short_hash}"
+# Result: ~/workspaces/myproject/feature-auth-abc12345
