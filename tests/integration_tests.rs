@@ -695,3 +695,31 @@ fn test_agent_help_shows_flags() {
         "Help should mention START_REF"
     );
 }
+
+#[test]
+fn test_editor_help_shows_options() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+
+    // Run editor --help
+    let output = test_repo.agentree(&["editor", "--help"]);
+    assert!(output.status.success(), "editor --help should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Branch name"),
+        "Help should mention branch name"
+    );
+    assert!(
+        stdout.contains("START_REF"),
+        "Help should mention START_REF"
+    );
+    assert!(
+        stdout.contains("--editor"),
+        "Help should mention --editor flag"
+    );
+    assert!(
+        stdout.contains("ARGS"),
+        "Help should mention additional args"
+    );
+}
