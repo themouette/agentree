@@ -41,11 +41,11 @@ Demonstrates different workspace path templates and locations.
 **Use when**: You need custom workspace organization (by user, by date, etc.).
 
 ### [`global-config.toml`](global-config.toml)
-Personal configuration for `~/.config/agentree/config.toml`.
+Personal configuration for your home directory.
 
 **Use when**: Setting your personal preferences across all projects.
 
-**Note**: Place at `~/.config/agentree/config.toml`, not in project.
+**Note**: Place at `~/.agentree.toml` (simple) or `~/.config/agentree/config.toml` (XDG-compliant).
 
 ### [`multi-agent.toml`](multi-agent.toml)
 Configuration with multiple AI agents (Claude, OpenCode, custom agents).
@@ -57,11 +57,11 @@ Configuration with multiple AI agents (Claude, OpenCode, custom agents).
 Agentree uses this precedence order:
 
 ```
-CLI arguments > Project .agentree.toml > Global ~/.config/agentree/config.toml > Defaults
+CLI arguments > Project .agentree.toml > ~/.agentree.toml > ~/.config/agentree/config.toml > Defaults
 ```
 
 **Example workflow**:
-1. Set personal preferences in `~/.config/agentree/config.toml` (use [`global-config.toml`](global-config.toml))
+1. Set personal preferences in `~/.agentree.toml` (use [`global-config.toml`](global-config.toml))
 2. Set team standards in project `.agentree.toml` (use [`team-shared.toml`](team-shared.toml))
 3. Override per-command: `agentree create feature --backend claude-vm`
 
@@ -126,7 +126,7 @@ location = "../workspaces"
 template = "{repo}/{branch}"
 ```
 
-**Personal** `~/.config/agentree/config.toml`:
+**Personal** `~/.agentree.toml`:
 ```toml
 [backend]
 default = "claude-vm"  # You prefer isolation

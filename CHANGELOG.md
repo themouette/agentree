@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hybrid global config support with two locations:
+  - Simple: `~/.agentree.toml` (cross-platform, easy to find)
+  - XDG-compliant: `~/.config/agentree/config.toml` (Linux) or `~/Library/Application Support/agentree/config.toml` (macOS)
+- `home_config_path()` function for `~/.agentree.toml` path resolution
+- `xdg_config_path()` function (renamed from `global_config_path()`) for XDG-compliant path resolution
+- Config loader now checks both global config locations with proper precedence
+- Tests for both XDG and home config path functions
 - Agent value completion for `--agent` flag showing available agents (claude, opencode)
 - Backend value completion for `--backend` flag showing available backends (local, claude-vm)
 - Shell completion improvements for bash, zsh, and fish
@@ -19,6 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Config precedence order updated: `CLI args > Project .agentree.toml > ~/.agentree.toml > XDG config > Defaults`
+- Global config filename in XDG directory changed from `agentree.toml` to `config.toml` (e.g., `~/.config/agentree/config.toml`)
+- Documentation updated to recommend `~/.agentree.toml` for simplicity while noting XDG option
 - Agent requirement is now backend-specific: required for local backend, optional for claude-vm
 - Config filename changed from `agentree.toml` to `.agentree.toml` (with leading dot) to match documentation
 - Claude-vm backend now uses `--` separator when calling `claude-vm agent` to disambiguate arguments

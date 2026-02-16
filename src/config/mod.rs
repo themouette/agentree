@@ -8,7 +8,7 @@ use std::str::FromStr;
 mod loader;
 pub mod validation;
 
-pub use loader::{global_config_path, load, project_config_path};
+pub use loader::{home_config_path, load, project_config_path, xdg_config_path};
 
 /// Backend configuration section
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

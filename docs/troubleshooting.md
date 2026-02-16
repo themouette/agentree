@@ -240,7 +240,7 @@ agentree create feature --backend local
 
 # Or configure global default
 echo '[backend]
-default = "local"' > ~/.config/agentree/config.toml
+default = "local"' > ~/.agentree.toml
 ```
 
 ### "Backend binary not in PATH"
@@ -398,11 +398,12 @@ EOF
 
 ```bash
 # Check config precedence:
-# CLI args > Project config > Global config > Defaults
+# CLI args > Project config > ~/.agentree.toml > ~/.config/agentree/config.toml > Defaults
 
 # Verify which config file is being used
 cat .agentree.toml  # Project config
-cat ~/.config/agentree/config.toml  # Global config
+cat ~/.agentree.toml  # Home global config (if exists)
+cat ~/.config/agentree/config.toml  # XDG global config (if exists)
 
 # CLI args override config:
 agentree create feature --backend local
