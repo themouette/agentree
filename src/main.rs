@@ -1,6 +1,7 @@
 use agentree::commands::{
     agent, cd, clean, completion, create, exec, list, remove, shell, shell_init, update,
 };
+use agentree::constants::DEFAULT_AGENTS;
 use agentree::version;
 use clap::{CommandFactory, Parser, Subcommand};
 use std::process;
@@ -73,27 +74,23 @@ fn main() {
 
     // Convenience command routing: agentree <agent-name> <branch> [flags]
     // Transforms to: agentree agent <branch> --agent <agent-name> [flags]
-    // Supported agent shortcuts: claude, opencode
-    if args.len() >= 2 {
-        let convenience_agents = ["claude", "opencode"];
+    // Supported agent shortcuts defined in constants::DEFAULT_AGENTS
+    if args.len() >= 2 && DEFAULT_AGENTS.contains(&args[1].as_str()) {
+        let agent_name = args[1].clone();
+        args.remove(1); // Remove agent name from position 1
 
-        if convenience_agents.contains(&args[1].as_str()) {
-            let agent_name = args[1].clone();
-            args.remove(1); // Remove agent name from position 1
+        // Insert "agent" subcommand at position 1
+        args.insert(1, "agent".to_string());
 
-            // Insert "agent" subcommand at position 1
-            args.insert(1, "agent".to_string());
+        // Find the position to insert --agent flag (before any flag that starts with -)
+        // or at the end if no flags present
+        let flag_pos = args
+            .iter()
+            .position(|a| a.starts_with('-'))
+            .unwrap_or(args.len());
 
-            // Find the position to insert --agent flag (before any flag that starts with -)
-            // or at the end if no flags present
-            let flag_pos = args
-                .iter()
-                .position(|a| a.starts_with('-'))
-                .unwrap_or(args.len());
-
-            args.insert(flag_pos, agent_name);
-            args.insert(flag_pos, "--agent".to_string());
-        }
+        args.insert(flag_pos, agent_name);
+        args.insert(flag_pos, "--agent".to_string());
     }
 
     let cli = Cli::parse_from(args);

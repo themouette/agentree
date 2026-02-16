@@ -58,9 +58,10 @@ pub trait Backend {
     ///
     /// # Arguments
     /// * `workspace_path` - Path to the workspace directory
-    /// * `agent` - Binary path of the agent to run (e.g., "claude", "/usr/local/bin/opencode")
+    /// * `agent` - Optional binary path of the agent to run (e.g., "claude", "/usr/local/bin/opencode").
+    ///   None indicates the backend should use its default agent selection
     /// * `flags` - Additional flags to pass to the agent
-    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()>;
+    fn agent(&self, workspace_path: &Path, agent: Option<&str>, flags: &[String]) -> Result<()>;
 
     /// Get the backend name
     fn name(&self) -> &str;
@@ -107,7 +108,7 @@ impl Backend for BackendType {
         }
     }
 
-    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
+    fn agent(&self, workspace_path: &Path, agent: Option<&str>, flags: &[String]) -> Result<()> {
         match self {
             BackendType::Local(backend) => backend.agent(workspace_path, agent, flags),
             BackendType::ClaudeVm(backend) => backend.agent(workspace_path, agent, flags),

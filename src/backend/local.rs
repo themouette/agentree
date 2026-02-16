@@ -42,10 +42,15 @@ impl Backend for LocalBackend {
         run_captured(binary, &args, workspace_path)
     }
 
-    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
-        // Local backend now supports any agent - just run the binary
+    fn agent(&self, workspace_path: &Path, agent: Option<&str>, flags: &[String]) -> Result<()> {
+        // Local backend requires an agent to be specified
+        let agent_binary = agent.ok_or_else(|| AgentreeError::BackendExecution {
+            backend: "local".to_string(),
+            error: "Agent binary required for local backend".to_string(),
+        })?;
+
         let flag_refs: Vec<&str> = flags.iter().map(|s| s.as_str()).collect();
-        run_interactive(agent, &flag_refs, workspace_path)
+        run_interactive(agent_binary, &flag_refs, workspace_path)
     }
 
     fn name(&self) -> &str {
@@ -103,20 +108,35 @@ mod tests {
     }
 
     #[test]
-    fn test_local_backend_agent_supported() {
-        // LocalBackend now supports agent mode by running any agent binary
-        // We can't test actual execution without a real agent binary,
-        // but we can verify the signature is correct
+    fn test_local_backend_agent_requires_binary() {
         let backend = LocalBackend::new();
         let temp_dir = TempDir::new().unwrap();
 
-        // Test with non-existent agent should fail (but not with "not supported" error)
-        let result = backend.agent(temp_dir.path(), "nonexistent-agent-binary", &[]);
+        // Test with None agent should fail with clear error
+        let result = backend.agent(temp_dir.path(), None, &[]);
+        assert!(result.is_err());
+        match result {
+            Err(AgentreeError::BackendExecution { backend, error }) => {
+                assert_eq!(backend, "local");
+                assert!(error.contains("Agent binary required"));
+            }
+            _ => panic!("Expected BackendExecution error"),
+        }
+    }
+
+    #[test]
+    fn test_local_backend_agent_with_binary() {
+        // LocalBackend supports agent mode by running any agent binary
+        // Test with non-existent agent should fail (but not with "required" error)
+        let backend = LocalBackend::new();
+        let temp_dir = TempDir::new().unwrap();
+
+        let result = backend.agent(temp_dir.path(), Some("nonexistent-agent-binary"), &[]);
         assert!(result.is_err());
 
-        // The error should NOT be about "does not support"
+        // The error should NOT be about "required"
         if let Err(AgentreeError::BackendExecution { error, .. }) = result {
-            assert!(!error.contains("does not support agent"));
+            assert!(!error.contains("required"));
         }
     }
 }

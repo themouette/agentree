@@ -13,7 +13,7 @@ pub fn global_config_path() -> Option<PathBuf> {
 
 /// Get the project config file path
 pub fn project_config_path(repo_root: &Path) -> PathBuf {
-    repo_root.join("agentree.toml")
+    repo_root.join(".agentree.toml")
 }
 
 /// Load config from a specific file
@@ -97,7 +97,7 @@ mod tests {
     fn test_project_config_path() {
         let repo_root = Path::new("/tmp/test-repo");
         let config_path = project_config_path(repo_root);
-        assert_eq!(config_path, Path::new("/tmp/test-repo/agentree.toml"));
+        assert_eq!(config_path, Path::new("/tmp/test-repo/.agentree.toml"));
     }
 
     #[test]

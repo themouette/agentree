@@ -1,4 +1,5 @@
 use crate::backend::BackendKind;
+use crate::constants;
 use crate::worktree::config::WorktreeConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -152,7 +153,12 @@ impl Config {
     ///
     /// # Errors
     /// * No agent specified and no default configured
-    /// * Unknown agent name (not in config)
+    /// * Unknown agent name (not in config or default agents)
+    ///
+    /// # Fallback behavior
+    /// If an agent is not found in the config, falls back to hardcoded defaults
+    /// for known agents (claude, opencode). This allows using default agents
+    /// without requiring configuration.
     pub fn resolve_agent(
         &self,
         agent_name: Option<&str>,
@@ -165,15 +171,33 @@ impl Config {
                 )
             })?;
 
-        let info = self.agent.agents.get(name).ok_or_else(|| {
-            crate::error::AgentreeError::ConfigError(format!(
-                "Unknown agent '{}'. Available: {:?}",
-                name,
-                self.agent.agents.keys().collect::<Vec<_>>()
-            ))
-        })?;
+        // First try to get from config
+        if let Some(info) = self.agent.agents.get(name) {
+            return Ok((info.bin.clone(), info.default_args.clone()));
+        }
 
-        Ok((info.bin.clone(), info.default_args.clone()))
+        // Fall back to hardcoded defaults for known agents
+        if let Some(binary) = constants::default_agent_binary(name) {
+            return Ok((binary.to_string(), vec![]));
+        }
+
+        // Unknown agent - show both configured and default agents
+        let mut available: Vec<String> = constants::DEFAULT_AGENTS
+            .iter()
+            .map(|a| format!("{} (default)", a))
+            .collect();
+        available.extend(
+            self.agent
+                .agents
+                .keys()
+                .map(|k| format!("{} (configured)", k)),
+        );
+
+        Err(crate::error::AgentreeError::ConfigError(format!(
+            "Unknown agent '{}'. Available: {}",
+            name,
+            available.join(", ")
+        )))
     }
 
     /// Validate configuration and return warnings and errors.
@@ -418,5 +442,109 @@ mod tests {
             Some("/cli/worktrees".to_string())
         );
         assert_eq!(final_config.worktree.template, "{branch}"); // Still from global
+    }
+
+    #[test]
+    fn test_resolve_agent_from_config() {
+        // Agent defined in config
+        let mut config = Config::default();
+        config.agent.agents.insert(
+            "custom".to_string(),
+            AgentInfo {
+                bin: "/usr/local/bin/custom-agent".to_string(),
+                default_args: vec!["--quiet".to_string()],
+            },
+        );
+
+        let result = config.resolve_agent(Some("custom"));
+        assert!(result.is_ok());
+        let (bin, args) = result.unwrap();
+        assert_eq!(bin, "/usr/local/bin/custom-agent");
+        assert_eq!(args, vec!["--quiet"]);
+    }
+
+    #[test]
+    fn test_resolve_agent_fallback_claude() {
+        // Agent not in config, but is a default agent
+        let config = Config::default();
+
+        let result = config.resolve_agent(Some("claude"));
+        assert!(result.is_ok());
+        let (bin, args) = result.unwrap();
+        assert_eq!(bin, "claude");
+        assert_eq!(args, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_resolve_agent_fallback_opencode() {
+        // Agent not in config, but is a default agent
+        let config = Config::default();
+
+        let result = config.resolve_agent(Some("opencode"));
+        assert!(result.is_ok());
+        let (bin, args) = result.unwrap();
+        assert_eq!(bin, "opencode");
+        assert_eq!(args, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_resolve_agent_config_overrides_default() {
+        // Agent defined in config should override default
+        let mut config = Config::default();
+        config.agent.agents.insert(
+            "claude".to_string(),
+            AgentInfo {
+                bin: "/custom/claude".to_string(),
+                default_args: vec!["--verbose".to_string()],
+            },
+        );
+
+        let result = config.resolve_agent(Some("claude"));
+        assert!(result.is_ok());
+        let (bin, args) = result.unwrap();
+        assert_eq!(bin, "/custom/claude");
+        assert_eq!(args, vec!["--verbose"]);
+    }
+
+    #[test]
+    fn test_resolve_agent_unknown() {
+        // Agent not in config and not a default
+        let config = Config::default();
+
+        let result = config.resolve_agent(Some("unknown-agent"));
+        assert!(result.is_err());
+        match result {
+            Err(crate::error::AgentreeError::ConfigError(msg)) => {
+                assert!(msg.contains("Unknown agent 'unknown-agent'"));
+            }
+            _ => panic!("Expected ConfigError"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_agent_uses_config_default() {
+        // No agent specified, should use config default
+        let mut config = Config::default();
+        config.agent.default = Some("claude".to_string());
+
+        let result = config.resolve_agent(None);
+        assert!(result.is_ok());
+        let (bin, _) = result.unwrap();
+        assert_eq!(bin, "claude");
+    }
+
+    #[test]
+    fn test_resolve_agent_no_agent_no_default() {
+        // No agent specified and no default configured
+        let config = Config::default();
+
+        let result = config.resolve_agent(None);
+        assert!(result.is_err());
+        match result {
+            Err(crate::error::AgentreeError::ConfigError(msg)) => {
+                assert!(msg.contains("No agent specified"));
+            }
+            _ => panic!("Expected ConfigError"),
+        }
     }
 }
