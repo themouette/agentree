@@ -61,16 +61,18 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     let (agent_bin, default_args) = match backend_kind {
         BackendKind::Local => {
             // Local backend requires an agent
-            config.resolve_agent(args.agent.as_deref())?
+            let (bin, args) = config.resolve_agent(args.agent.as_deref())?;
+            (Some(bin), args)
         }
         BackendKind::ClaudeVm => {
             // Claude-vm backend: agent is optional
             if args.agent.is_some() {
                 // User explicitly specified an agent, resolve it
-                config.resolve_agent(args.agent.as_deref())?
+                let (bin, args) = config.resolve_agent(args.agent.as_deref())?;
+                (Some(bin), args)
             } else {
                 // No agent specified, let claude-vm handle it
-                (String::new(), vec![])
+                (None, vec![])
             }
         }
     };
@@ -103,7 +105,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
 
     // Agent respects backend isolation (BACK-09)
     let backend = BackendType::from_kind(config.effective_backend());
-    backend.agent(result.path(), &agent_bin, &all_flags)?;
+    backend.agent(result.path(), agent_bin.as_deref(), &all_flags)?;
 
     Ok(())
 }

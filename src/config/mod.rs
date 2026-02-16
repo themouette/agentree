@@ -181,11 +181,22 @@ impl Config {
             return Ok((binary.to_string(), vec![]));
         }
 
-        // Unknown agent
+        // Unknown agent - show both configured and default agents
+        let mut available: Vec<String> = constants::DEFAULT_AGENTS
+            .iter()
+            .map(|a| format!("{} (default)", a))
+            .collect();
+        available.extend(
+            self.agent
+                .agents
+                .keys()
+                .map(|k| format!("{} (configured)", k)),
+        );
+
         Err(crate::error::AgentreeError::ConfigError(format!(
-            "Unknown agent '{}'. Available: {:?}",
+            "Unknown agent '{}'. Available: {}",
             name,
-            self.agent.agents.keys().collect::<Vec<_>>()
+            available.join(", ")
         )))
     }
 

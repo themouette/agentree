@@ -29,6 +29,42 @@ impl Default for ClaudeVmBackend {
     }
 }
 
+impl ClaudeVmBackend {
+    /// Build command-line arguments for the claude-vm agent command
+    ///
+    /// # Arguments
+    /// * `agent` - Optional agent binary name
+    /// * `flags` - Additional flags to pass to the agent
+    ///
+    /// # Returns
+    /// Vector of arguments to pass to claude-vm
+    ///
+    /// # Format
+    /// - No args:       ["agent"]
+    /// - With agent:    ["agent", "--", "--agent", "claude"]
+    /// - With flags:    ["agent", "--", "--verbose"]
+    /// - With both:     ["agent", "--", "--agent", "opencode", "--quiet"]
+    pub(crate) fn build_agent_args(&self, agent: Option<&str>, flags: &[String]) -> Vec<String> {
+        let mut args = vec!["agent".to_string()];
+
+        // Add -- separator before agent-specific arguments if we have any
+        if agent.is_some() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
+
+        // Add --agent flag if agent binary is specified
+        if let Some(agent_name) = agent {
+            args.push("--agent".to_string());
+            args.push(agent_name.to_string());
+        }
+
+        // Append remaining flags
+        args.extend_from_slice(flags);
+
+        args
+    }
+}
+
 impl Backend for ClaudeVmBackend {
     fn shell(&self, workspace_path: &Path) -> Result<()> {
         // Delegate to claude-vm shell command which opens a shell inside the VM
@@ -40,25 +76,8 @@ impl Backend for ClaudeVmBackend {
         run_host_command(workspace_path, command, self.name())
     }
 
-    fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
-        // Build args: ["agent", "--"] + optional --agent flag + remaining flags
-        // The "--" separator disambiguates claude-vm args from agent args
-        let mut args = vec!["agent".to_string()];
-
-        // Add -- separator before agent-specific arguments
-        if !agent.is_empty() || !flags.is_empty() {
-            args.push("--".to_string());
-        }
-
-        // Add --agent flag if agent binary is specified
-        if !agent.is_empty() {
-            args.push("--agent".to_string());
-            args.push(agent.to_string());
-        }
-
-        // Append remaining flags
-        args.extend_from_slice(flags);
-
+    fn agent(&self, workspace_path: &Path, agent: Option<&str>, flags: &[String]) -> Result<()> {
+        let args = self.build_agent_args(agent, flags);
         let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         run_interactive(&self.binary, &args_refs, workspace_path)
     }
@@ -97,75 +116,36 @@ mod tests {
     }
 
     #[test]
-    fn test_agent_args_no_agent_no_flags() {
+    fn test_build_agent_args_no_agent_no_flags() {
         // When no agent and no flags: just "agent" subcommand, no "--" separator
-        // Can't easily test run_interactive, but we can verify the logic
-        // by checking what args would be built
-
-        let mut args = vec!["agent".to_string()];
-        let agent = "";
-        let flags: Vec<String> = vec![];
-
-        if !agent.is_empty() || !flags.is_empty() {
-            args.push("--".to_string());
-        }
-
+        let backend = ClaudeVmBackend::new();
+        let args = backend.build_agent_args(None, &[]);
         assert_eq!(args, vec!["agent"]);
     }
 
     #[test]
-    fn test_agent_args_with_agent() {
+    fn test_build_agent_args_with_agent() {
         // When agent specified: "agent", "--", "--agent", "claude"
-        let mut args = vec!["agent".to_string()];
-        let agent = "claude";
-        let flags: Vec<String> = vec![];
-
-        if !agent.is_empty() || !flags.is_empty() {
-            args.push("--".to_string());
-        }
-
-        if !agent.is_empty() {
-            args.push("--agent".to_string());
-            args.push(agent.to_string());
-        }
-
+        let backend = ClaudeVmBackend::new();
+        let args = backend.build_agent_args(Some("claude"), &[]);
         assert_eq!(args, vec!["agent", "--", "--agent", "claude"]);
     }
 
     #[test]
-    fn test_agent_args_with_flags() {
+    fn test_build_agent_args_with_flags() {
         // When flags specified: "agent", "--", flags...
-        let mut args = vec!["agent".to_string()];
-        let agent = "";
+        let backend = ClaudeVmBackend::new();
         let flags = vec!["--verbose".to_string()];
-
-        if !agent.is_empty() || !flags.is_empty() {
-            args.push("--".to_string());
-        }
-
-        args.extend_from_slice(&flags);
-
+        let args = backend.build_agent_args(None, &flags);
         assert_eq!(args, vec!["agent", "--", "--verbose"]);
     }
 
     #[test]
-    fn test_agent_args_with_agent_and_flags() {
+    fn test_build_agent_args_with_agent_and_flags() {
         // When both specified: "agent", "--", "--agent", "opencode", flags...
-        let mut args = vec!["agent".to_string()];
-        let agent = "opencode";
+        let backend = ClaudeVmBackend::new();
         let flags = vec!["--quiet".to_string()];
-
-        if !agent.is_empty() || !flags.is_empty() {
-            args.push("--".to_string());
-        }
-
-        if !agent.is_empty() {
-            args.push("--agent".to_string());
-            args.push(agent.to_string());
-        }
-
-        args.extend_from_slice(&flags);
-
+        let args = backend.build_agent_args(Some("opencode"), &flags);
         assert_eq!(args, vec!["agent", "--", "--agent", "opencode", "--quiet"]);
     }
 }

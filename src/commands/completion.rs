@@ -1,4 +1,4 @@
-use crate::constants::DEFAULT_AGENTS;
+use crate::constants::{BACKEND_NAMES, DEFAULT_AGENTS};
 use crate::error::Result;
 use clap_complete::{generate, Shell};
 use std::io::{self, Write};
@@ -35,8 +35,9 @@ pub fn execute(args: CompletionArgs, cmd: &mut clap::Command) -> Result<()> {
 
 /// Generate dynamic completion helper for bash
 fn write_bash_dynamic_completion() -> Result<()> {
-    // Build agent list at runtime from DEFAULT_AGENTS
+    // Build agent and backend lists at runtime from constants
     let agents = DEFAULT_AGENTS.join(" ");
+    let backends = BACKEND_NAMES.join(" ");
 
     let dynamic_completion = format!(
         r#"
@@ -68,7 +69,7 @@ _agentree_branch_commands() {{
             ;;
         --backend)
             # Provide backend completions
-            COMPREPLY=( $(compgen -W "local claude-vm" -- "$cur") )
+            COMPREPLY=( $(compgen -W "{backends}" -- "$cur") )
             return 0
             ;;
     esac
@@ -131,7 +132,8 @@ if declare -F _agentree > /dev/null; then
     }}
 fi
 "#,
-        agents = agents
+        agents = agents,
+        backends = backends
     );
 
     print!("{}", dynamic_completion);
@@ -140,8 +142,9 @@ fi
 
 /// Generate dynamic completion helper for zsh
 fn write_zsh_dynamic_completion() -> Result<()> {
-    // Build agent list at runtime from DEFAULT_AGENTS
+    // Build agent and backend lists at runtime from constants
     let agents = DEFAULT_AGENTS.join(" ");
+    let backends = BACKEND_NAMES.join(" ");
 
     let dynamic_completion = format!(
         r#"
@@ -163,7 +166,7 @@ _agentree_agents() {{
 
 _agentree_backends() {{
     local backends
-    backends=(local claude-vm)
+    backends=({backends})
     _describe 'backends' backends
 }}
 
@@ -246,7 +249,8 @@ if (( $+functions[_agentree] )); then
     }}
 fi
 "#,
-        agents = agents
+        agents = agents,
+        backends = backends
     );
 
     print!("{}", dynamic_completion);
@@ -255,8 +259,9 @@ fi
 
 /// Generate dynamic completion helper for fish
 fn write_fish_dynamic_completion() -> Result<()> {
-    // Build agent list at runtime from DEFAULT_AGENTS
-    let agents = DEFAULT_AGENTS.join(" ");
+    // Build agent and backend lists at runtime from constants
+    let agents = DEFAULT_AGENTS.join("\n    echo ");
+    let backends = BACKEND_NAMES.join("\n    echo ");
 
     let dynamic_completion = format!(
         r#"
@@ -273,8 +278,7 @@ function __agentree_agents
 end
 
 function __agentree_backends
-    echo local
-    echo claude-vm
+    echo {backends}
 end
 
 # Add value completions for flags
@@ -292,7 +296,8 @@ complete -c agentree -n "__fish_seen_subcommand_from cd" -a "(__agentree_branche
 # First argument is new branch name (no suggestions)
 complete -c agentree -n "__fish_seen_subcommand_from create" -a "(__agentree_branches)" -d "Start ref"
 "#,
-        agents = agents
+        agents = agents,
+        backends = backends
     );
 
     print!("{}", dynamic_completion);
