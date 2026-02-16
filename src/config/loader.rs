@@ -4,11 +4,21 @@ use std::path::{Path, PathBuf};
 
 use super::Config;
 
-/// Get the global config file path
+/// Get the XDG-compliant global config file path
 ///
-/// Returns None if the platform doesn't have a standard config directory
-pub fn global_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|dir| dir.join("agentree").join("agentree.toml"))
+/// Returns:
+/// - Linux: `~/.config/agentree/config.toml`
+/// - macOS: `~/Library/Application Support/agentree/config.toml`
+/// - None if the platform doesn't have a standard config directory
+pub fn xdg_config_path() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("agentree").join("config.toml"))
+}
+
+/// Get the simple home directory config file path
+///
+/// Returns `~/.agentree.toml` on all platforms, or None if home dir can't be determined
+pub fn home_config_path() -> Option<PathBuf> {
+    dirs::home_dir().map(|dir| dir.join(".agentree.toml"))
 }
 
 /// Get the project config file path
@@ -32,10 +42,11 @@ fn from_file(path: &Path) -> Result<Config> {
 
 /// Load and merge configuration from global and project config files
 ///
-/// Missing config files are silently skipped. The merge strategy is key-by-key:
-/// - Start with default config
-/// - If global config exists, load and merge it (global overrides defaults)
-/// - If project config exists, load and merge it (project overrides global)
+/// Missing config files are silently skipped. The merge strategy is key-by-key with this precedence:
+/// 1. **Defaults** - Built-in defaults
+/// 2. **XDG config** - `~/.config/agentree/config.toml` (Linux) or `~/Library/Application Support/agentree/config.toml` (macOS)
+/// 3. **Home config** - `~/.agentree.toml` (all platforms, overrides XDG if present)
+/// 4. **Project config** - `.agentree.toml` in repo root (overrides all global configs)
 ///
 /// Each config field is merged independently, so setting one field in project config
 /// doesn't clobber other fields from global config.
@@ -45,15 +56,23 @@ fn from_file(path: &Path) -> Result<Config> {
 pub fn load(repo_root: &Path) -> Result<Config> {
     let mut config = Config::default();
 
-    // Try to load global config and merge
-    if let Some(global_path) = global_config_path() {
-        if global_path.exists() {
-            let global_config = from_file(&global_path)?;
-            config = config.merge(global_config);
+    // Try to load XDG-compliant global config and merge
+    if let Some(xdg_path) = xdg_config_path() {
+        if xdg_path.exists() {
+            let xdg_config = from_file(&xdg_path)?;
+            config = config.merge(xdg_config);
         }
     }
 
-    // Try to load project config and merge (overrides global on a key-by-key basis)
+    // Try to load home directory config and merge (overrides XDG)
+    if let Some(home_path) = home_config_path() {
+        if home_path.exists() {
+            let home_config = from_file(&home_path)?;
+            config = config.merge(home_config);
+        }
+    }
+
+    // Try to load project config and merge (overrides all global configs)
     let project_path = project_config_path(repo_root);
     if project_path.exists() {
         let project_config = from_file(&project_path)?;
@@ -86,11 +105,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn test_global_config_path_ends_with_agentree_toml() {
-        let path = global_config_path();
+    fn test_xdg_config_path_ends_with_agentree_config_toml() {
+        let path = xdg_config_path();
         assert!(path.is_some());
         let path = path.unwrap();
-        assert!(path.ends_with("agentree/agentree.toml"));
+        assert!(path.ends_with("agentree/config.toml"));
+    }
+
+    #[test]
+    fn test_home_config_path_ends_with_agentree_toml() {
+        let path = home_config_path();
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert!(path.ends_with(".agentree.toml"));
     }
 
     #[test]

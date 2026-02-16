@@ -57,11 +57,21 @@ feature-auth    hotfix-bug    main    # Second arg is start ref
 
 ## Configuration Precedence
 
+Configuration is loaded and merged in this order (later overrides earlier):
+
 ```
-CLI arguments > Project config > Global config > Built-in defaults
+Built-in defaults
+  ↓
+XDG global config (~/.config/agentree/config.toml or ~/Library/Application Support/agentree/config.toml)
+  ↓
+Home global config (~/.agentree.toml)
+  ↓
+Project config (.agentree.toml)
+  ↓
+CLI arguments (highest priority)
 ```
 
-**Example**: If you set `backend = "local"` globally but pass `--backend claude-vm` to a command, the CLI argument wins.
+**Example**: If you set `backend = "local"` in `~/.agentree.toml` but pass `--backend claude-vm` to a command, the CLI argument wins.
 
 ## Configuration Files
 
@@ -91,9 +101,20 @@ default_args = ["--quiet"]
 
 **When to use**: Project-specific settings that all team members should share.
 
-### Global Config: `~/.config/agentree/config.toml`
+### Global Config
 
-Your personal defaults across all projects:
+Agentree supports **two locations** for global configuration (both optional):
+
+1. **XDG-compliant** (recommended for Linux):
+   - Linux: `~/.config/agentree/config.toml`
+   - macOS: `~/Library/Application Support/agentree/config.toml`
+
+2. **Simple home directory** (recommended for simplicity):
+   - All platforms: `~/.agentree.toml`
+
+**Precedence**: If both exist, `~/.agentree.toml` overrides the XDG path.
+
+**Example** (`~/.agentree.toml`):
 
 ```toml
 [backend]
