@@ -111,6 +111,9 @@ agentree rm feature-*          # Supports wildcards
 # Open shell in workspace
 agentree shell <branch>
 
+# Open editor in workspace (runs on local machine)
+agentree editor <branch>
+
 # Execute command in workspace
 agentree exec <branch> -- npm test
 
@@ -186,6 +189,10 @@ default = "local"  # or "claude-vm"
 
 [agent]
 default = "claude"
+
+[editor]
+bin = "code"  # Use VS Code, falls back to $EDITOR
+default_args = ["--wait"]
 ```
 
 See [docs/configuration.md](docs/configuration.md) for all options.

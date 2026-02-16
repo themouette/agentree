@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Forwards all trailing arguments to the editor
   - Runs directly on local machine (not through backend isolation)
   - Respects editor precedence: --editor flag, config, $EDITOR, $VISUAL, vi
+  - Includes tab completion for branch names in bash, zsh, and fish
 - EditorConfig section in configuration system
   - `editor.bin`: Configure default editor binary
   - `editor.default_args`: Configure default arguments passed to editor

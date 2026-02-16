@@ -723,3 +723,36 @@ fn test_editor_help_shows_options() {
         "Help should mention additional args"
     );
 }
+
+#[test]
+fn test_completion_includes_editor_command() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+
+    // Test bash completion
+    let output = test_repo.agentree(&["completion", "bash"]);
+    assert!(output.status.success(), "bash completion should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("shell|agent|exec|remove|cd|editor"),
+        "Bash completion should include editor in branch completion list"
+    );
+
+    // Test zsh completion
+    let output = test_repo.agentree(&["completion", "zsh"]);
+    assert!(output.status.success(), "zsh completion should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("shell|agent|exec|remove|cd|editor"),
+        "Zsh completion should include editor in branch completion list"
+    );
+
+    // Test fish completion
+    let output = test_repo.agentree(&["completion", "fish"]);
+    assert!(output.status.success(), "fish completion should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("__fish_seen_subcommand_from editor"),
+        "Fish completion should include editor subcommand"
+    );
+}
