@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `editor` command to open an editor in a workspace
+  - Auto-creates workspace if it doesn't exist
+  - Supports optional start_ref for workspace creation
+  - Forwards all trailing arguments to the editor
+  - Runs directly on local machine (not through backend isolation)
+  - Respects editor precedence: --editor flag, config, $EDITOR, $VISUAL, vi
+- EditorConfig section in configuration system
+  - `editor.bin`: Configure default editor binary
+  - `editor.default_args`: Configure default arguments passed to editor
+- Environment variable support for editor selection ($EDITOR, $VISUAL)
 - Hybrid global config support with two locations:
   - Simple: `~/.agentree.toml` (cross-platform, easy to find)
   - XDG-compliant: `~/.config/agentree/config.toml` (Linux) or `~/Library/Application Support/agentree/config.toml` (macOS)
