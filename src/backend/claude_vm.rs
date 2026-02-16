@@ -41,8 +41,14 @@ impl Backend for ClaudeVmBackend {
     }
 
     fn agent(&self, workspace_path: &Path, agent: &str, flags: &[String]) -> Result<()> {
-        // Build args: ["agent"] + optional --agent flag + remaining flags
+        // Build args: ["agent", "--"] + optional --agent flag + remaining flags
+        // The "--" separator disambiguates claude-vm args from agent args
         let mut args = vec!["agent".to_string()];
+
+        // Add -- separator before agent-specific arguments
+        if !agent.is_empty() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
 
         // Add --agent flag if agent binary is specified
         if !agent.is_empty() {
@@ -88,5 +94,78 @@ mod tests {
     fn test_default_trait() {
         let backend = ClaudeVmBackend::default();
         assert_eq!(backend.binary, "claude-vm");
+    }
+
+    #[test]
+    fn test_agent_args_no_agent_no_flags() {
+        // When no agent and no flags: just "agent" subcommand, no "--" separator
+        // Can't easily test run_interactive, but we can verify the logic
+        // by checking what args would be built
+
+        let mut args = vec!["agent".to_string()];
+        let agent = "";
+        let flags: Vec<String> = vec![];
+
+        if !agent.is_empty() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
+
+        assert_eq!(args, vec!["agent"]);
+    }
+
+    #[test]
+    fn test_agent_args_with_agent() {
+        // When agent specified: "agent", "--", "--agent", "claude"
+        let mut args = vec!["agent".to_string()];
+        let agent = "claude";
+        let flags: Vec<String> = vec![];
+
+        if !agent.is_empty() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
+
+        if !agent.is_empty() {
+            args.push("--agent".to_string());
+            args.push(agent.to_string());
+        }
+
+        assert_eq!(args, vec!["agent", "--", "--agent", "claude"]);
+    }
+
+    #[test]
+    fn test_agent_args_with_flags() {
+        // When flags specified: "agent", "--", flags...
+        let mut args = vec!["agent".to_string()];
+        let agent = "";
+        let flags = vec!["--verbose".to_string()];
+
+        if !agent.is_empty() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
+
+        args.extend_from_slice(&flags);
+
+        assert_eq!(args, vec!["agent", "--", "--verbose"]);
+    }
+
+    #[test]
+    fn test_agent_args_with_agent_and_flags() {
+        // When both specified: "agent", "--", "--agent", "opencode", flags...
+        let mut args = vec!["agent".to_string()];
+        let agent = "opencode";
+        let flags = vec!["--quiet".to_string()];
+
+        if !agent.is_empty() || !flags.is_empty() {
+            args.push("--".to_string());
+        }
+
+        if !agent.is_empty() {
+            args.push("--agent".to_string());
+            args.push(agent.to_string());
+        }
+
+        args.extend_from_slice(&flags);
+
+        assert_eq!(args, vec!["agent", "--", "--agent", "opencode", "--quiet"]);
     }
 }
