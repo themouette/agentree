@@ -15,7 +15,7 @@ pub struct ExecArgs {
     pub command: Vec<String>,
 
     /// Git ref to create branch from (if workspace doesn't exist)
-    #[arg(long)]
+    #[arg(short = 'b', long)]
     pub base: Option<String>,
 
     /// Backend to use for this worktree (overrides config)

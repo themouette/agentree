@@ -600,6 +600,42 @@ fn test_exec_with_base() {
 }
 
 #[test]
+fn test_exec_with_base_shorthand() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a base branch
+    test_repo.create_branch("base-branch");
+    test_repo.git(&["checkout", "base-branch"]);
+    test_repo.commit("Base branch commit");
+    test_repo.git(&["checkout", "main"]);
+
+    // Run exec with -b shorthand
+    let output = test_repo.agentree(&[
+        "exec",
+        "new-from-base-short",
+        "-b",
+        "base-branch",
+        "--",
+        "pwd",
+    ]);
+    assert!(
+        output.status.success(),
+        "exec with -b should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify worktree was created
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("new-from-base-short"),
+        "new-from-base-short worktree should exist"
+    );
+}
+
+#[test]
 fn test_exec_existing_workspace() {
     let test_repo = TestRepo::new();
     test_repo.init_git();

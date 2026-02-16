@@ -72,6 +72,11 @@ _agentree_branch_commands() {{
             COMPREPLY=( $(compgen -W "{backends}" -- "$cur") )
             return 0
             ;;
+        --base)
+            # Provide branch completions for base flag
+            COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
+            return 0
+            ;;
     esac
 
     # Commands that take branch as first argument

@@ -38,9 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING**: Base branch specification changed from positional argument to `--base` flag in `shell`, `agent`, and `exec` commands
+- **BREAKING**: Base branch specification changed from positional argument to `--base`/`-b` flag in `shell`, `agent`, and `exec` commands
   - Old: `agentree agent feature-branch main`
-  - New: `agentree agent feature-branch --base main`
+  - New: `agentree agent feature-branch --base main` or `agentree agent feature-branch -b main`
   - This removes ambiguity when passing arguments to agents (e.g., `agentree agent feat /clear` now correctly passes `/clear` to the agent)
 - Config precedence order updated: `CLI args > Project .agentree.toml > ~/.agentree.toml > XDG config > Defaults`
 - Global config filename in XDG directory changed from `agentree.toml` to `config.toml` (e.g., `~/.config/agentree/config.toml`)
