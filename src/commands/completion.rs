@@ -76,7 +76,7 @@ _agentree_branch_commands() {{
 
     # Commands that take branch as first argument
     case "$cmd" in
-        shell|agent|exec|remove|cd)
+        shell|agent|exec|remove|cd|editor)
             # Check if previous word is the command itself or a flag that expects a value
             # This handles: agentree shell <branch> and agentree shell --flag value <branch>
             case "$prev" in
@@ -217,7 +217,7 @@ if (( $+functions[_agentree] )); then
 
         # For commands that take branch arguments, offer both branches and flags
         case "$subcmd" in
-            shell|agent|exec|remove|cd)
+            shell|agent|exec|remove|cd|editor)
                 # Offer both branches and let static completion add flags
                 _agentree_branches
                 _agentree_static
@@ -291,6 +291,7 @@ complete -c agentree -n "__fish_seen_subcommand_from agent" -a "(__agentree_bran
 complete -c agentree -n "__fish_seen_subcommand_from exec" -a "(__agentree_branches)" -d "Branch"
 complete -c agentree -n "__fish_seen_subcommand_from remove" -a "(__agentree_branches)" -d "Branch"
 complete -c agentree -n "__fish_seen_subcommand_from cd" -a "(__agentree_branches)" -d "Branch"
+complete -c agentree -n "__fish_seen_subcommand_from editor" -a "(__agentree_branches)" -d "Branch"
 
 # For create command, second argument is start_ref (suggest branches)
 # First argument is new branch name (no suggestions)

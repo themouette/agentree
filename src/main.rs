@@ -1,5 +1,5 @@
 use agentree::commands::{
-    agent, cd, clean, completion, create, exec, list, remove, shell, shell_init, update,
+    agent, cd, clean, completion, create, editor, exec, list, remove, shell, shell_init, update,
 };
 use agentree::constants::DEFAULT_AGENTS;
 use agentree::version;
@@ -61,6 +61,9 @@ enum Command {
     /// Start AI agent in workspace (auto-creates if needed)
     Agent(agent::AgentArgs),
 
+    /// Open editor in workspace (auto-creates if needed, runs on host)
+    Editor(editor::EditorArgs),
+
     /// Generate shell completion script
     Completion(completion::CompletionArgs),
 
@@ -112,6 +115,7 @@ fn main() {
         }
         Command::Exec(args) => exec::execute(args),
         Command::Agent(args) => agent::execute(args),
+        Command::Editor(args) => editor::execute(args),
         Command::Completion(args) => {
             let mut cmd = Cli::command();
             completion::execute(args, &mut cmd)

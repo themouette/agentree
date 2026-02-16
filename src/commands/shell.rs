@@ -41,7 +41,8 @@ pub fn execute(args: ShellArgs) -> Result<()> {
     let config = config::load(&repo_root)?.with_cli_overrides(
         args.backend.as_deref(),
         args.worktree_location.as_deref(),
-        None,
+        None, // agent not used in shell command
+        None, // editor not used in shell command
     )?;
 
     // Auto-create workspace (idempotent - returns Resumed if exists)

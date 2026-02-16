@@ -33,7 +33,7 @@ Once enabled, you can tab-complete:
 
 **Dynamic Completions:**
 - **Branch names**: `agentree shell <TAB>` shows your actual git branches
-- **Commands with branches**: Works for `shell`, `agent`, `exec`, `remove`, `cd`
+- **Commands with branches**: Works for `shell`, `agent`, `editor`, `exec`, `remove`, `cd`
 - **Base branches**: `agentree create new --base <TAB>` shows branches
 
 ### Example
@@ -303,6 +303,63 @@ agentree agent feature --verbose
 # Runs: opencode --quiet --verbose
 ```
 
+### `[editor]` Section
+
+Controls which editor to use for the `agentree editor` command.
+
+#### `bin` (optional)
+
+Path or name of the editor binary.
+
+**Type**: String (path or binary name)
+**Default**: Falls back to `$EDITOR`, then `$VISUAL`, then `vi`
+**Examples**:
+```toml
+[editor]
+bin = "code"  # VS Code
+
+[editor]
+bin = "nvim"  # Neovim
+
+[editor]
+bin = "/usr/local/bin/sublime"  # Absolute path
+```
+
+**Editor Selection Priority**:
+1. `--editor` CLI flag (highest)
+2. `editor.bin` from config
+3. `$EDITOR` environment variable
+4. `$VISUAL` environment variable
+5. `vi` (fallback)
+
+#### `default_args` (optional)
+
+Default flags to pass to the editor.
+
+**Type**: Array of strings
+**Default**: `[]` (no arguments)
+**Examples**:
+```toml
+[editor]
+bin = "code"
+default_args = ["--wait", "--new-window"]
+
+[editor]
+bin = "nvim"
+default_args = ["+set number"]
+```
+
+**Override per command**:
+```bash
+# Use different editor for this workspace
+agentree editor feature --editor nvim
+
+# Pass additional arguments
+agentree editor feature -- --readonly
+```
+
+**Note**: The editor command always runs on the **local machine**, not through backend isolation. This ensures your local editor configuration and plugins work correctly.
+
 ## Complete Example
 
 A production-ready configuration:
@@ -328,6 +385,10 @@ default_args = []
 [agent.opencode]
 bin = "opencode"
 default_args = ["--quiet"]
+
+[editor]
+bin = "code"
+default_args = ["--wait"]
 ```
 
 **Personal `~/.config/agentree/config.toml`**:
@@ -343,6 +404,11 @@ default = "claude"
 [agent.claude]
 # My custom Claude installation
 bin = "/opt/claude-code/bin/claude"
+default_args = []
+
+[editor]
+# I prefer neovim
+bin = "nvim"
 default_args = []
 ```
 
@@ -361,6 +427,9 @@ agentree create feature --location ~/tmp-workspaces
 
 # Override agent
 agentree agent feature --agent opencode
+
+# Override editor
+agentree editor feature --editor nvim
 
 # Multiple overrides
 agentree create feature \
