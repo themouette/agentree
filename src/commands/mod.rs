@@ -3,6 +3,7 @@ pub mod cd;
 pub mod clean;
 pub mod completion;
 pub mod create;
+pub mod editor;
 pub mod exec;
 pub mod list;
 pub mod remove;
