@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod cd;
 pub mod clean;
+pub mod common;
 pub mod completion;
 pub mod create;
 pub mod editor;
