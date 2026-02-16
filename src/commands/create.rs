@@ -9,13 +9,9 @@ pub struct CreateArgs {
     /// Branch name to create worktree for
     pub branch: String,
 
-    /// Base branch or commit to create from (also accepts positional START_REF)
-    #[arg(value_name = "START_REF")]
-    pub start_ref: Option<String>,
-
-    /// Base branch or commit (deprecated: use positional START_REF instead)
-    #[arg(long = "base", hide = true)]
-    pub base_alias: Option<String>,
+    /// Git ref to create branch from (if workspace doesn't exist)
+    #[arg(short = 'b', long)]
+    pub base: Option<String>,
 
     /// Backend to use for this worktree (overrides config)
     #[arg(long)]
@@ -48,15 +44,12 @@ pub fn execute(args: CreateArgs) -> Result<()> {
         None, // editor not used in create command
     )?;
 
-    // Resolve effective base reference (prefer positional arg, fall back to --base flag)
-    let effective_base = args.start_ref.or(args.base_alias);
-
     // Create the worktree
     let result = operations::create_worktree(
         &config.worktree,
         &repo_root,
         &args.branch,
-        effective_base.as_deref(),
+        args.base.as_deref(),
     )?;
 
     // Save metadata for newly created worktrees (not for resumed ones)
