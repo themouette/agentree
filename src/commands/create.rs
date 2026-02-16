@@ -15,10 +15,9 @@ pub fn execute(args: CreateArgs) -> Result<()> {
         args.workspace.backend.as_deref(),
         args.workspace.worktree_location.as_deref(),
         None, // agent not used in create command
-        None, // editor not used in create command
     )?;
 
-    // Create the worktree
+    // Create the worktree (not ensure_workspace, create always fails if exists)
     let result = operations::create_worktree(
         &ctx.config.worktree,
         &ctx.repo_root,
@@ -26,7 +25,7 @@ pub fn execute(args: CreateArgs) -> Result<()> {
         args.workspace.base.as_deref(),
     )?;
 
-    // Save metadata for newly created worktrees (not for resumed ones)
+    // Save metadata for newly created worktrees
     if let operations::CreateResult::Created(_) = result {
         let metadata = WorktreeMetadata::new(ctx.config.effective_backend().to_string());
         metadata.save(result.path())?;

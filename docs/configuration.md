@@ -29,29 +29,34 @@ Once enabled, you can tab-complete:
 **Static Completions:**
 - **Commands**: `agentree <TAB>` shows all subcommands (create, list, shell, agent, etc.)
 - **Flags**: `agentree create --<TAB>` shows available flags (--backend, --base, etc.)
-- **Aliases**: `ls` and `rm` aliases work
+- **Help text**: All flags and commands include descriptions
 
-**Dynamic Completions:**
-- **Branch names**: `agentree shell <TAB>` shows your actual git branches
-- **Commands with branches**: Works for `shell`, `agent`, `editor`, `exec`, `remove`, `cd`
-- **Base branches**: `agentree create new --base <TAB>` shows branches
+**Dynamic Flag Value Completions:**
+- **Branch names for --base flag**: `agentree create new --base <TAB>` shows git branches
+- **Agent names for --agent flag**: `agentree agent my-branch --agent <TAB>` shows available agents
+- **Backend names for --backend flag**: `agentree create new --backend <TAB>` shows backends
 
 ### Example
 
 ```bash
 # In a git repository with branches: main, feature-auth, hotfix-bug
 
-$ agentree shell <TAB>
-feature-auth    hotfix-bug    main
-
-$ agentree remove <TAB>
-feature-auth    hotfix-bug    main
-
+# Flag value completion (works reliably)
 $ agentree create new-feature --base <TAB>
-feature-auth    hotfix-bug    main    # --base flag suggests branches
+feature-auth    hotfix-bug    main
+
+$ agentree agent my-branch --agent <TAB>
+claude    opencode
+
+$ agentree create new --backend <TAB>
+local    claude-vm
+
+# Positional branch arguments: type the branch name directly (no tab completion)
+$ agentree shell my-branch
+$ agentree agent feature-auth
 ```
 
-**Note**: Dynamic branch completion only works when you're inside a git repository. Outside git repos, you get static completions only.
+**Note**: Dynamic completions only work inside git repositories. The `--base` flag completion is especially useful to avoid typos when specifying base branches.
 
 ---
 

@@ -53,7 +53,7 @@ cargo install --path .
 ### Shell integration & completion (optional but recommended)
 
 ```bash
-# One-liner: enables cd command + tab completion for commands and branches!
+# One-liner: enables cd command + tab completion
 echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zshrc
 
 # Or separately:
@@ -62,7 +62,8 @@ echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zsh
 
 # After sourcing, you get:
 # - cd command: agentree cd <branch> changes directory
-# - Tab completion: agentree shell <TAB> shows your git branches
+# - Tab completion: agentree create new --base <TAB> shows your git branches
+# - Tab completion: agentree agent my-branch --agent <TAB> shows available agents
 ```
 
 </details>

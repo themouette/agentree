@@ -38,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Shell completion simplified to only complete flag values (--base, --agent, --backend), removed brittle positional branch argument completion
+  - **What works**: Tab completion for flag values reliably suggests branches, agents, and backends
+  - **What changed**: Positional branch arguments (e.g., `agentree agent <TAB>`) no longer suggest branches
+  - **Why**: Positional detection logic was fragile and conflicted with clap's static completions, causing broken behavior
+  - **Impact**: Flag value completion (the most useful feature) is now reliable across all shells (bash, zsh, fish)
 - **BREAKING**: Base branch specification changed from positional argument to `--base`/`-b` flag in `create`, `shell`, `agent`, and `exec` commands
   - **Old syntax**:
     - `agentree create feature main`

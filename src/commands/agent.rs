@@ -1,8 +1,6 @@
 use crate::backend::{Backend, BackendKind, BackendType};
 use crate::commands::common::{WorkspaceArgs, WorkspaceContext};
 use crate::error::Result;
-use crate::utils::git::validate_workspace_path;
-use crate::worktree::{metadata::WorktreeMetadata, operations};
 use clap::Parser;
 
 #[derive(Parser, Debug)]
@@ -25,7 +23,6 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         args.workspace.backend.as_deref(),
         args.workspace.worktree_location.as_deref(),
         args.agent.as_deref(),
-        None, // editor not used in agent command
     )?;
 
     // Determine which backend we're using
@@ -57,31 +54,12 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     let mut all_flags = default_args;
     all_flags.extend(args.flags);
 
-    // Auto-create workspace (idempotent - returns Resumed if exists)
-    let result = operations::ensure_workspace(
-        &ctx.config.worktree,
-        &ctx.repo_root,
-        &args.workspace.branch,
-        args.workspace.base.as_deref(),
-    )?;
-
-    // Save metadata for newly created workspaces (not for resumed ones)
-    if let operations::CreateResult::Created(_) = result {
-        let metadata = WorktreeMetadata::new(ctx.config.effective_backend().to_string());
-        metadata.save(result.path())?;
-    }
-
-    // Print auto-create message only for Created (not Resumed)
-    if let operations::CreateResult::Created(_) = result {
-        println!("{}", result.message(&args.workspace.branch));
-    }
-
-    // Validate path accessibility for backend
-    validate_workspace_path(result.path(), &ctx.config.effective_backend())?;
+    // Ensure workspace exists (create or resume) and set up metadata
+    let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
 
     // Agent respects backend isolation (BACK-09)
     let backend = BackendType::from_kind(ctx.config.effective_backend());
-    backend.agent(result.path(), agent_bin.as_deref(), &all_flags)?;
+    backend.agent(&workspace.path, agent_bin.as_deref(), &all_flags)?;
 
     Ok(())
 }

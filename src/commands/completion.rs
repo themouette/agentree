@@ -42,85 +42,40 @@ fn write_bash_dynamic_completion() -> Result<()> {
     let dynamic_completion = format!(
         r#"
 
-# Dynamic branch and value completion for agentree
+# Dynamic flag value completion for agentree
 _agentree_branches() {{
     if git rev-parse --git-dir > /dev/null 2>&1; then
         git branch --format='%(refname:short)' 2>/dev/null
     fi
 }}
 
-# Agent completions for --agent flag
 _agentree_agents() {{
     echo "{agents}"
 }}
 
-# Override completion for commands that take branch arguments
-_agentree_branch_commands() {{
+# Enhanced completion that adds dynamic flag values
+_agentree_enhanced() {{
     local cur="${{COMP_WORDS[COMP_CWORD]}}"
     local prev="${{COMP_WORDS[COMP_CWORD-1]}}"
-    local cmd="${{COMP_WORDS[1]}}"
 
-    # Provide values for specific flags
+    # Handle flag value completions
     case "$prev" in
-        --agent)
-            # Provide agent completions
+        --agent|-a)
             COMPREPLY=( $(compgen -W "$(_agentree_agents)" -- "$cur") )
             return 0
             ;;
         --backend)
-            # Provide backend completions
             COMPREPLY=( $(compgen -W "{backends}" -- "$cur") )
             return 0
             ;;
-        --base)
-            # Provide branch completions for base flag
+        --base|-b)
             COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
             return 0
             ;;
     esac
 
-    # Commands that take branch as first argument
-    case "$cmd" in
-        shell|agent|exec|remove|cd|editor)
-            # Check if previous word is the command itself or a flag that expects a value
-            # This handles: agentree shell <branch> and agentree shell --flag value <branch>
-            case "$prev" in
-                "$cmd")
-                    # Directly after command - suggest branches
-                    COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                    return 0
-                    ;;
-                *)
-                    # Check if we're likely at a branch position (not a flag)
-                    if [[ "$cur" != -* ]] && [[ "$prev" != -* ]]; then
-                        COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                        return 0
-                    fi
-                    ;;
-            esac
-            ;;
-        create)
-            # For create: <branch> [start_ref]
-            # Context-aware: check what the previous word was instead of position
-            case "$prev" in
-                create)
-                    # Directly after 'create' - new branch name (no completion)
-                    COMPREPLY=()
-                    return 0
-                    ;;
-                *)
-                    # If previous word is not a flag and current word is not a flag,
-                    # we're likely at the start_ref position - suggest branches
-                    if [[ "$cur" != -* ]] && [[ "$prev" != -* ]] && [[ "$prev" != "$cmd" ]]; then
-                        COMPREPLY=( $(compgen -W "$(_agentree_branches)" -- "$cur") )
-                        return 0
-                    fi
-                    ;;
-            esac
-            ;;
-    esac
-
-    return 1
+    # For everything else, use static completion
+    _agentree_static
 }}
 
 # Wrap the original completion function
@@ -130,10 +85,7 @@ if declare -F _agentree > /dev/null; then
     eval "$(declare -f _agentree | sed '1s/_agentree/_agentree_static/')"
 
     _agentree() {{
-        # Try dynamic completion first
-        _agentree_branch_commands && return 0
-        # Fall back to static completion
-        _agentree_static
+        _agentree_enhanced
     }}
 fi
 "#,
@@ -154,7 +106,7 @@ fn write_zsh_dynamic_completion() -> Result<()> {
     let dynamic_completion = format!(
         r#"
 
-# Dynamic branch and value completion for agentree (zsh)
+# Dynamic flag value completion for agentree (zsh)
 _agentree_branches() {{
     local branches
     if git rev-parse --git-dir > /dev/null 2>&1; then
@@ -175,7 +127,7 @@ _agentree_backends() {{
     _describe 'backends' backends
 }}
 
-# Add branch and value completion to relevant commands
+# Add dynamic flag value completion
 # This extends the generated completion
 if (( $+functions[_agentree] )); then
     # Store original function
@@ -183,15 +135,11 @@ if (( $+functions[_agentree] )); then
 
     # Override with dynamic version
     _agentree() {{
-        local curcontext="$curcontext" state line
-        typeset -A opt_args
-        local cmd
-        local current_word="${{words[CURRENT]}}"
         local prev_word="${{words[$((CURRENT-1))]}}"
 
-        # Check if we're completing a flag value
+        # Handle flag value completions
         case "$prev_word" in
-            --agent)
+            --agent|-a)
                 _agentree_agents
                 return 0
                 ;;
@@ -199,62 +147,14 @@ if (( $+functions[_agentree] )); then
                 _agentree_backends
                 return 0
                 ;;
-            --base)
+            --base|-b)
                 _agentree_branches
                 return 0
                 ;;
         esac
 
-        # If current word starts with -, let static completion handle flags
-        if [[ "$current_word" == -* ]]; then
-            _agentree_static
-            return 0
-        fi
-
-        # Parse the command line to get the subcommand
-        local -a args
-        args=(${{words[2,-1]}})
-
-        # Find the subcommand (first non-flag argument after agentree)
-        local subcmd=""
-        for word in ${{words[2,-1]}}; do
-            if [[ "$word" != -* ]]; then
-                subcmd="$word"
-                break
-            fi
-        done
-
-        # For commands that take branch arguments, offer both branches and flags
-        case "$subcmd" in
-            shell|agent|exec|remove|cd|editor)
-                # Offer both branches and let static completion add flags
-                _agentree_branches
-                _agentree_static
-                return 0
-                ;;
-            create)
-                # For create: first arg is branch name (no completion), second is start_ref (branches)
-                # Count non-flag arguments
-                local -a positional
-                positional=()
-                for word in ${{words[2,-1]}}; do
-                    if [[ "$word" != -* ]] && [[ "$word" != "$subcmd" ]]; then
-                        positional+=("$word")
-                    fi
-                done
-
-                if [[ ${{#positional}} -eq 1 ]]; then
-                    # Second positional arg - suggest branches for start_ref
-                    _agentree_branches
-                fi
-                _agentree_static
-                return 0
-                ;;
-            *)
-                _agentree_static
-                return 0
-                ;;
-        esac
+        # For everything else, use static completion
+        _agentree_static
     }}
 fi
 "#,
@@ -275,7 +175,7 @@ fn write_fish_dynamic_completion() -> Result<()> {
     let dynamic_completion = format!(
         r#"
 
-# Dynamic branch and value completion for agentree (fish)
+# Dynamic flag value completion for agentree (fish)
 function __agentree_branches
     if git rev-parse --git-dir >/dev/null 2>&1
         git branch --format='%(refname:short)' 2>/dev/null
@@ -290,22 +190,10 @@ function __agentree_backends
     echo {backends}
 end
 
-# Add value completions for flags
+# Add dynamic value completions for flags
 complete -c agentree -l agent -f -a "(__agentree_agents)" -d "AI agent to use"
 complete -c agentree -l backend -f -a "(__agentree_backends)" -d "Backend to use"
 complete -c agentree -l base -f -a "(__agentree_branches)" -d "Base branch to create from"
-
-# Add branch completion to commands that take branch arguments
-complete -c agentree -n "__fish_seen_subcommand_from shell" -a "(__agentree_branches)" -d "Branch"
-complete -c agentree -n "__fish_seen_subcommand_from agent" -a "(__agentree_branches)" -d "Branch"
-complete -c agentree -n "__fish_seen_subcommand_from exec" -a "(__agentree_branches)" -d "Branch"
-complete -c agentree -n "__fish_seen_subcommand_from remove" -a "(__agentree_branches)" -d "Branch"
-complete -c agentree -n "__fish_seen_subcommand_from cd" -a "(__agentree_branches)" -d "Branch"
-complete -c agentree -n "__fish_seen_subcommand_from editor" -a "(__agentree_branches)" -d "Branch"
-
-# For create command, second argument is start_ref (suggest branches)
-# First argument is new branch name (no suggestions)
-complete -c agentree -n "__fish_seen_subcommand_from create" -a "(__agentree_branches)" -d "Start ref"
 "#,
         agents = agents,
         backends = backends

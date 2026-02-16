@@ -44,6 +44,17 @@ pub struct WorkspaceContext {
     pub config: Config,
 }
 
+/// Result of workspace setup
+///
+/// Contains information about the workspace that was created or resumed.
+pub struct WorkspaceSetup {
+    /// Path to the workspace directory
+    pub path: PathBuf,
+
+    /// Whether the workspace was newly created (true) or already existed (false)
+    pub was_created: bool,
+}
+
 impl WorkspaceContext {
     /// Initialize workspace context from CLI arguments
     ///
@@ -107,8 +118,67 @@ impl WorkspaceContext {
             backend,
             worktree_location,
             agent,
+            None, // editor not used by commands that use WorkspaceContext
         )?;
 
         Ok(Self { repo_root, config })
+    }
+
+    /// Ensure workspace exists and set up metadata
+    ///
+    /// This method performs the common workspace setup operations:
+    /// 1. Creates or resumes the workspace (idempotent)
+    /// 2. Saves metadata for newly created workspaces
+    /// 3. Prints creation message for new workspaces
+    /// 4. Validates workspace path accessibility for the backend
+    ///
+    /// # Arguments
+    ///
+    /// * `branch` - Name of the branch for the workspace
+    /// * `base` - Optional git ref to create branch from
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(WorkspaceSetup)` with workspace path and creation status.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// # use agentree::commands::common::WorkspaceContext;
+    /// # fn main() -> agentree::error::Result<()> {
+    /// # let ctx = WorkspaceContext::init(None, None, None)?;
+    /// let workspace = ctx.ensure_workspace("feature-branch", None)?;
+    /// println!("Workspace at: {}", workspace.path.display());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn ensure_workspace(&self, branch: &str, base: Option<&str>) -> Result<WorkspaceSetup> {
+        use crate::utils::git::validate_workspace_path;
+        use crate::worktree::{metadata::WorktreeMetadata, operations};
+
+        // Create or resume workspace
+        let result = operations::ensure_workspace(
+            &self.config.worktree,
+            &self.repo_root,
+            branch,
+            base,
+        )?;
+
+        let was_created = matches!(result, operations::CreateResult::Created(_));
+
+        // Save metadata for newly created workspaces
+        if was_created {
+            let metadata = WorktreeMetadata::new(self.config.effective_backend().to_string());
+            metadata.save(result.path())?;
+            println!("{}", result.message(branch));
+        }
+
+        // Validate path accessibility for backend
+        validate_workspace_path(result.path(), &self.config.effective_backend())?;
+
+        Ok(WorkspaceSetup {
+            path: result.path().to_path_buf(),
+            was_created,
+        })
     }
 }
