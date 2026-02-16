@@ -50,6 +50,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         args.backend.as_deref(),
         args.worktree_location.as_deref(),
         args.agent.as_deref(),
+        None, // editor not used in agent command
     )?;
 
     // Determine which backend we're using
