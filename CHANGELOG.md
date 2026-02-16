@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tests for both XDG and home config path functions
 - Agent value completion for `--agent` flag showing available agents (claude, opencode)
 - Backend value completion for `--backend` flag showing available backends (local, claude-vm)
+- Branch value completion for `--base` flag in shell, agent, and exec commands
 - Shell completion improvements for bash, zsh, and fish
 - Centralized default agents constant (`DEFAULT_AGENTS`) as single source of truth
 - Fallback agent resolution to hardcoded defaults (claude, opencode) when not configured
@@ -37,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING**: Base branch specification changed from positional argument to `--base` flag in `shell`, `agent`, and `exec` commands
+  - Old: `agentree agent feature-branch main`
+  - New: `agentree agent feature-branch --base main`
+  - This removes ambiguity when passing arguments to agents (e.g., `agentree agent feat /clear` now correctly passes `/clear` to the agent)
 - Config precedence order updated: `CLI args > Project .agentree.toml > ~/.agentree.toml > XDG config > Defaults`
 - Global config filename in XDG directory changed from `agentree.toml` to `config.toml` (e.g., `~/.config/agentree/config.toml`)
 - Documentation updated to recommend `~/.agentree.toml` for simplicity while noting XDG option

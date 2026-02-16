@@ -564,7 +564,7 @@ fn test_exec_autocreates_and_runs_command() {
 }
 
 #[test]
-fn test_exec_with_start_ref() {
+fn test_exec_with_base() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
@@ -575,11 +575,18 @@ fn test_exec_with_start_ref() {
     test_repo.commit("Base branch commit");
     test_repo.git(&["checkout", "main"]);
 
-    // Run exec with start_ref
-    let output = test_repo.agentree(&["exec", "new-from-base", "base-branch", "--", "pwd"]);
+    // Run exec with --base flag
+    let output = test_repo.agentree(&[
+        "exec",
+        "new-from-base",
+        "--base",
+        "base-branch",
+        "--",
+        "pwd",
+    ]);
     assert!(
         output.status.success(),
-        "exec with start_ref should succeed: {}",
+        "exec with --base should succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -656,10 +663,7 @@ fn test_shell_help_shows_args() {
         stdout.contains("Branch name"),
         "Help should mention branch name"
     );
-    assert!(
-        stdout.contains("START_REF"),
-        "Help should mention START_REF"
-    );
+    assert!(stdout.contains("--base"), "Help should mention --base flag");
 }
 
 #[test]
@@ -690,10 +694,7 @@ fn test_agent_help_shows_flags() {
         stdout.contains("Branch name"),
         "Help should mention branch name"
     );
-    assert!(
-        stdout.contains("START_REF"),
-        "Help should mention START_REF"
-    );
+    assert!(stdout.contains("--base"), "Help should mention --base flag");
 }
 
 #[test]

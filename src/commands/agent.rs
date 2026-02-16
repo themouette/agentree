@@ -10,13 +10,13 @@ pub struct AgentArgs {
     /// Branch name (workspace auto-created if needed)
     pub branch: String,
 
-    /// Git ref to create branch from
-    #[arg(value_name = "START_REF")]
-    pub start_ref: Option<String>,
-
     /// Flags to pass through to the AI agent (after --)
     #[arg(last = true)]
     pub flags: Vec<String>,
+
+    /// Git ref to create branch from (if workspace doesn't exist)
+    #[arg(long)]
+    pub base: Option<String>,
 
     /// Backend to use for this worktree (overrides config)
     #[arg(long)]
@@ -87,7 +87,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         &config.worktree,
         &repo_root,
         &args.branch,
-        args.start_ref.as_deref(),
+        args.base.as_deref(),
     )?;
 
     // Save metadata for newly created workspaces (not for resumed ones)

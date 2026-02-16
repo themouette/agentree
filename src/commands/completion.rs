@@ -194,6 +194,10 @@ if (( $+functions[_agentree] )); then
                 _agentree_backends
                 return 0
                 ;;
+            --base)
+                _agentree_branches
+                return 0
+                ;;
         esac
 
         # If current word starts with -, let static completion handle flags
@@ -284,6 +288,7 @@ end
 # Add value completions for flags
 complete -c agentree -l agent -f -a "(__agentree_agents)" -d "AI agent to use"
 complete -c agentree -l backend -f -a "(__agentree_backends)" -d "Backend to use"
+complete -c agentree -l base -f -a "(__agentree_branches)" -d "Base branch to create from"
 
 # Add branch completion to commands that take branch arguments
 complete -c agentree -n "__fish_seen_subcommand_from shell" -a "(__agentree_branches)" -d "Branch"
