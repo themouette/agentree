@@ -39,6 +39,17 @@ pub struct AgentConfig {
     pub agents: HashMap<String, AgentInfo>,
 }
 
+/// Editor configuration section
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EditorConfig {
+    /// Binary path for editor (defaults to $EDITOR or $VISUAL)
+    pub bin: Option<String>,
+    /// Default arguments to pass to editor
+    #[serde(default)]
+    pub default_args: Vec<String>,
+}
+
 /// Root configuration structure combining all config sections
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
@@ -53,6 +64,10 @@ pub struct Config {
     /// Agent configuration
     #[serde(default)]
     pub agent: AgentConfig,
+
+    /// Editor configuration
+    #[serde(default)]
+    pub editor: EditorConfig,
 }
 
 impl Config {
@@ -100,6 +115,14 @@ impl Config {
                 default: other.agent.default.or(self.agent.default),
                 agents,
             },
+            editor: EditorConfig {
+                bin: other.editor.bin.or(self.editor.bin),
+                default_args: if !other.editor.default_args.is_empty() {
+                    other.editor.default_args
+                } else {
+                    self.editor.default_args
+                },
+            },
         }
     }
 
@@ -116,6 +139,7 @@ impl Config {
         backend: Option<&str>,
         worktree_location: Option<&str>,
         agent: Option<&str>,
+        editor: Option<&str>,
     ) -> Result<Self, crate::error::AgentreeError> {
         if let Some(backend_str) = backend {
             let kind = BackendKind::from_str(backend_str)?;
@@ -129,6 +153,11 @@ impl Config {
         // CLI agent overrides config default
         if let Some(agent_name) = agent {
             self.agent.default = Some(agent_name.to_string());
+        }
+
+        // CLI editor overrides config default
+        if let Some(editor_bin) = editor {
+            self.editor.bin = Some(editor_bin.to_string());
         }
 
         Ok(self)
@@ -198,6 +227,22 @@ impl Config {
             name,
             available.join(", ")
         )))
+    }
+
+    /// Get the effective editor binary, falling back through precedence chain.
+    ///
+    /// Precedence (highest to lowest):
+    /// 1. Config `editor.bin` (from CLI override or config file)
+    /// 2. $EDITOR environment variable
+    /// 3. $VISUAL environment variable
+    /// 4. "vi" as final fallback
+    pub fn effective_editor(&self) -> String {
+        self.editor
+            .bin
+            .clone()
+            .or_else(|| std::env::var("EDITOR").ok())
+            .or_else(|| std::env::var("VISUAL").ok())
+            .unwrap_or_else(|| "vi".to_string())
     }
 
     /// Validate configuration and return warnings and errors.
@@ -363,7 +408,7 @@ mod tests {
     #[test]
     fn test_with_cli_overrides_backend() {
         let config = Config::default();
-        let result = config.with_cli_overrides(Some("claude-vm"), None, None);
+        let result = config.with_cli_overrides(Some("claude-vm"), None, None, None);
 
         assert!(result.is_ok());
         let config = result.unwrap();
@@ -373,7 +418,7 @@ mod tests {
     #[test]
     fn test_with_cli_overrides_invalid_backend() {
         let config = Config::default();
-        let result = config.with_cli_overrides(Some("invalid"), None, None);
+        let result = config.with_cli_overrides(Some("invalid"), None, None, None);
 
         assert!(result.is_err());
         match result {
@@ -391,7 +436,7 @@ mod tests {
     #[test]
     fn test_with_cli_overrides_location() {
         let config = Config::default();
-        let result = config.with_cli_overrides(None, Some("/cli/location"), None);
+        let result = config.with_cli_overrides(None, Some("/cli/location"), None, None);
 
         assert!(result.is_ok());
         let config = result.unwrap();
@@ -432,7 +477,8 @@ mod tests {
         assert_eq!(default.worktree.template, "{branch}"); // Still from global
 
         // CLI overrides backend and location
-        let result = default.with_cli_overrides(Some("claude-vm"), Some("/cli/worktrees"), None);
+        let result =
+            default.with_cli_overrides(Some("claude-vm"), Some("/cli/worktrees"), None, None);
         assert!(result.is_ok());
         let final_config = result.unwrap();
 
