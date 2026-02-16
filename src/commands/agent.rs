@@ -10,13 +10,13 @@ pub struct AgentArgs {
     /// Branch name (workspace auto-created if needed)
     pub branch: String,
 
-    /// Flags to pass through to the AI agent (after --)
-    #[arg(last = true)]
-    pub flags: Vec<String>,
-
     /// Git ref to create branch from (if workspace doesn't exist)
     #[arg(short = 'b', long)]
     pub base: Option<String>,
+
+    /// Flags to pass through to the AI agent (after --)
+    #[arg(last = true)]
+    pub flags: Vec<String>,
 
     /// Backend to use for this worktree (overrides config)
     #[arg(long)]

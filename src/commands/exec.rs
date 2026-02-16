@@ -10,13 +10,13 @@ pub struct ExecArgs {
     /// Branch name (workspace auto-created if needed)
     pub branch: String,
 
-    /// Command to execute (after --)
-    #[arg(last = true, required = true)]
-    pub command: Vec<String>,
-
     /// Git ref to create branch from (if workspace doesn't exist)
     #[arg(short = 'b', long)]
     pub base: Option<String>,
+
+    /// Command to execute (after --)
+    #[arg(last = true, required = true)]
+    pub command: Vec<String>,
 
     /// Backend to use for this worktree (overrides config)
     #[arg(long)]
