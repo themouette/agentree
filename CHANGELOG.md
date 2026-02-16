@@ -38,10 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING**: Base branch specification changed from positional argument to `--base`/`-b` flag in `shell`, `agent`, and `exec` commands
-  - Old: `agentree agent feature-branch main`
-  - New: `agentree agent feature-branch --base main` or `agentree agent feature-branch -b main`
-  - This removes ambiguity when passing arguments to agents (e.g., `agentree agent feat /clear` now correctly passes `/clear` to the agent)
+- **BREAKING**: Base branch specification changed from positional argument to `--base`/`-b` flag in `create`, `shell`, `agent`, and `exec` commands
+  - **Old syntax**:
+    - `agentree create feature main`
+    - `agentree agent feature-branch main`
+    - `agentree shell my-branch develop`
+    - `agentree exec test-branch main -- npm test`
+  - **New syntax**:
+    - `agentree create feature --base main` or `agentree create feature -b main`
+    - `agentree agent feature-branch --base main` or `agentree agent feature-branch -b main`
+    - `agentree shell my-branch --base develop` or `agentree shell my-branch -b develop`
+    - `agentree exec test-branch --base main -- npm test` or `agentree exec test-branch -b main -- npm test`
+  - **Why**: This removes ambiguity when passing arguments to agents (e.g., `agentree agent feat /clear` now correctly passes `/clear` to the agent instead of treating it as a base branch)
+  - **Migration**: All commands now use consistent `--base`/`-b` flag syntax. Scripts using the old positional syntax will fail with clear error messages
 - Config precedence order updated: `CLI args > Project .agentree.toml > ~/.agentree.toml > XDG config > Defaults`
 - Global config filename in XDG directory changed from `agentree.toml` to `config.toml` (e.g., `~/.config/agentree/config.toml`)
 - Documentation updated to recommend `~/.agentree.toml` for simplicity while noting XDG option
@@ -52,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bash completion was missing `--base` flag value completion (zsh and fish had it)
 - Zsh completion now shows both flags and branches (previously only showed branches)
 - Zsh completion array subscript syntax error that caused "invalid subscript" error
 - Config file not being loaded because code looked for `agentree.toml` instead of `.agentree.toml`
