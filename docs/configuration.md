@@ -47,8 +47,8 @@ feature-auth    hotfix-bug    main
 $ agentree remove <TAB>
 feature-auth    hotfix-bug    main
 
-$ agentree create new-feature <TAB>
-feature-auth    hotfix-bug    main    # Second arg is start ref
+$ agentree create new-feature --base <TAB>
+feature-auth    hotfix-bug    main    # --base flag suggests branches
 ```
 
 **Note**: Dynamic branch completion only works when you're inside a git repository. Outside git repos, you get static completions only.

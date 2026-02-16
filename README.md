@@ -97,8 +97,13 @@ agentree remove --merged main
 ```bash
 # Start AI agent in a workspace (creates if needed)
 agentree agent <branch>
-agentree claude <branch>       # Shortcut for Claude
-agentree opencode <branch>     # Shortcut for OpenCode
+agentree agent <branch> --base main    # Create from specific branch
+agentree claude <branch>               # Shortcut for Claude
+agentree opencode <branch>             # Shortcut for OpenCode
+
+# Create workspace explicitly
+agentree create <branch>
+agentree create <branch> -b develop    # Create from develop branch
 
 # List all workspaces
 agentree list
@@ -110,12 +115,14 @@ agentree rm feature-*          # Supports wildcards
 
 # Open shell in workspace
 agentree shell <branch>
+agentree shell <branch> --base main    # Create from main if doesn't exist
 
 # Open editor in workspace (runs on local machine)
 agentree editor <branch>
 
 # Execute command in workspace
 agentree exec <branch> -- npm test
+agentree exec <branch> -b hotfix -- npm test  # Create from hotfix
 
 # Go to workspace directory
 agentree cd <branch>
