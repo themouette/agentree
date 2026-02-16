@@ -152,7 +152,7 @@ agentree create new-feature
 
 ```bash
 # Use suggested branch name
-agentree create feature main  # Not mainnn
+agentree create feature --base main  # Not mainnn
 
 # Or list all branches to find correct name
 git branch -a

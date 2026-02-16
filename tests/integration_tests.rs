@@ -564,7 +564,7 @@ fn test_exec_autocreates_and_runs_command() {
 }
 
 #[test]
-fn test_exec_with_start_ref() {
+fn test_exec_with_base() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
@@ -575,11 +575,18 @@ fn test_exec_with_start_ref() {
     test_repo.commit("Base branch commit");
     test_repo.git(&["checkout", "main"]);
 
-    // Run exec with start_ref
-    let output = test_repo.agentree(&["exec", "new-from-base", "base-branch", "--", "pwd"]);
+    // Run exec with --base flag
+    let output = test_repo.agentree(&[
+        "exec",
+        "new-from-base",
+        "--base",
+        "base-branch",
+        "--",
+        "pwd",
+    ]);
     assert!(
         output.status.success(),
-        "exec with start_ref should succeed: {}",
+        "exec with --base should succeed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
 
@@ -589,6 +596,42 @@ fn test_exec_with_start_ref() {
     assert!(
         stdout.contains("new-from-base"),
         "new-from-base worktree should exist"
+    );
+}
+
+#[test]
+fn test_exec_with_base_shorthand() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a base branch
+    test_repo.create_branch("base-branch");
+    test_repo.git(&["checkout", "base-branch"]);
+    test_repo.commit("Base branch commit");
+    test_repo.git(&["checkout", "main"]);
+
+    // Run exec with -b shorthand
+    let output = test_repo.agentree(&[
+        "exec",
+        "new-from-base-short",
+        "-b",
+        "base-branch",
+        "--",
+        "pwd",
+    ]);
+    assert!(
+        output.status.success(),
+        "exec with -b should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify worktree was created
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("new-from-base-short"),
+        "new-from-base-short worktree should exist"
     );
 }
 
@@ -656,10 +699,7 @@ fn test_shell_help_shows_args() {
         stdout.contains("Branch name"),
         "Help should mention branch name"
     );
-    assert!(
-        stdout.contains("START_REF"),
-        "Help should mention START_REF"
-    );
+    assert!(stdout.contains("--base"), "Help should mention --base flag");
 }
 
 #[test]
@@ -690,10 +730,7 @@ fn test_agent_help_shows_flags() {
         stdout.contains("Branch name"),
         "Help should mention branch name"
     );
-    assert!(
-        stdout.contains("START_REF"),
-        "Help should mention START_REF"
-    );
+    assert!(stdout.contains("--base"), "Help should mention --base flag");
 }
 
 #[test]
@@ -724,35 +761,7 @@ fn test_editor_help_shows_options() {
     );
 }
 
-#[test]
-fn test_completion_includes_editor_command() {
-    let test_repo = TestRepo::new();
-    test_repo.init_git();
-
-    // Test bash completion
-    let output = test_repo.agentree(&["completion", "bash"]);
-    assert!(output.status.success(), "bash completion should succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("shell|agent|exec|remove|cd|editor"),
-        "Bash completion should include editor in branch completion list"
-    );
-
-    // Test zsh completion
-    let output = test_repo.agentree(&["completion", "zsh"]);
-    assert!(output.status.success(), "zsh completion should succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("shell|agent|exec|remove|cd|editor"),
-        "Zsh completion should include editor in branch completion list"
-    );
-
-    // Test fish completion
-    let output = test_repo.agentree(&["completion", "fish"]);
-    assert!(output.status.success(), "fish completion should succeed");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        stdout.contains("__fish_seen_subcommand_from editor"),
-        "Fish completion should include editor subcommand"
-    );
-}
+// NOTE: test_completion_includes_editor_command was removed because the
+// completion simplification (commit 720a19c) removed positional branch completion entirely.
+// The test was checking for implementation details (case statements) that no longer exist.
+// Completions now focus on flag values (--base, --agent, --backend) which are tested elsewhere.
