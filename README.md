@@ -55,16 +55,6 @@ source ~/.bashrc  # or source ~/.zshrc
 <details>
 <summary>Other installation methods</summary>
 
-### Homebrew (macOS)
-
-```bash
-brew install themouette/tap/agentree
-
-# Add shell integration
-echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.zshrc
-source ~/.zshrc
-```
-
 ### From source
 
 ```bash
