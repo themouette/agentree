@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Multiple output formats for `list` command via `--format` flag:
+  - `two-lines` (default): Summary line with absolute path on second line
+  - `table`: Compact table format with relative paths (120 char width)
+  - `card`: Card-style boxes with full details and absolute paths
+  - `json`: Machine-readable JSON output with absolute paths
 - New `editor` command to open an editor in a workspace
   - Auto-creates workspace if it doesn't exist
   - Supports optional start_ref for workspace creation
@@ -49,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default `list` output format changed from table to two-lines format for better readability with long paths
 - Shell completion simplified to only complete flag values (--base, --agent, --backend), removed brittle positional branch argument completion
   - **What works**: Tab completion for flag values reliably suggests branches, agents, and backends
   - **What changed**: Positional branch arguments (e.g., `agentree agent <TAB>`) no longer suggest branches
@@ -74,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config filename changed from `agentree.toml` to `.agentree.toml` (with leading dot) to match documentation
 - Claude-vm backend now uses `--` separator when calling `claude-vm agent` to disambiguate arguments
 - Agent command help text now clarifies when `--agent` flag is required vs optional
+
+### Deprecated
+
+- `--json` flag for `list` command; use `--format=json` instead (backward compatible with deprecation warning)
 
 ### Fixed
 
