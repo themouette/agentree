@@ -30,10 +30,11 @@ pub fn execute(args: AgentArgs) -> Result<()> {
 
     // Resolve agent based on backend requirements:
     // - local backend: agent is required
+    // - docker-sandbox backend: agent is required
     // - claude-vm backend: agent is optional (claude-vm can handle agent selection)
     let (agent_bin, default_args) = match backend_kind {
-        BackendKind::Local => {
-            // Local backend requires an agent
+        BackendKind::Local | BackendKind::DockerSandbox => {
+            // Local and docker-sandbox backends require an agent
             let (bin, args) = ctx.config.resolve_agent(args.agent.as_deref())?;
             (Some(bin), args)
         }

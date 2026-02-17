@@ -96,6 +96,22 @@ pub enum AgentreeError {
 
     #[error("Failed to check for updates: {0}")]
     UpdateCheckFailed(String),
+
+    #[error("Docker daemon is not running. Please start Docker Desktop and try again.\nCheck status with: docker info")]
+    DockerNotRunning,
+
+    #[error("Docker version {current} does not support sandboxes.\nMinimum required: Engine {minimum_engine} / Desktop {minimum_desktop}\nUpdate Docker Desktop: https://www.docker.com/products/docker-desktop/")]
+    DockerSandboxNotSupported {
+        current: String,
+        minimum_engine: String,
+        minimum_desktop: String,
+    },
+
+    #[error("Docker Sandboxes are not supported on Linux.\nDocker Sandboxes use microVMs which require macOS or Windows.\nConsider using the 'claude-vm' backend instead for VM isolation on Linux.")]
+    DockerSandboxLinuxNotSupported,
+
+    #[error("Docker sandbox '{name}' not found.\nThe sandbox may have been removed outside of agentree.\nTry running: agentree remove {branch} && agentree create {branch}")]
+    SandboxNotFound { name: String, branch: String },
 }
 
 pub type Result<T> = std::result::Result<T, AgentreeError>;
