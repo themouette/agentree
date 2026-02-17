@@ -1431,9 +1431,6 @@ fn test_error_message_includes_path() {
 
 #[test]
 fn test_doctor_clean_repo() {
-    // Clean up any leftover worktrees from previous tests
-    let _ = std::fs::remove_dir_all("/tmp/worktrees");
-
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
@@ -1550,9 +1547,6 @@ fn test_doctor_finds_broken_metadata() {
 
 #[test]
 fn test_doctor_json_output() {
-    // Clean up any leftover worktrees from previous tests
-    let _ = std::fs::remove_dir_all("/tmp/worktrees");
-
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
