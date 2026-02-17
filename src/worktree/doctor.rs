@@ -181,7 +181,14 @@ fn scan_for_orphaned(
         } else {
             // No .git file, but might contain subdirectories with worktrees
             // Recurse into this directory
-            let _ = scan_for_orphaned(&path, tracked_paths, issues, depth + 1);
+            if let Err(e) = scan_for_orphaned(&path, tracked_paths, issues, depth + 1) {
+                // Log error but continue scanning other directories
+                eprintln!(
+                    "Warning: Failed to scan directory '{}': {}",
+                    path.display(),
+                    e
+                );
+            }
         }
     }
 
