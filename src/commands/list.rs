@@ -131,6 +131,17 @@ fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
     Ok(worktrees_with_time)
 }
 
+fn format_created_date(created: Option<&String>) -> String {
+    created
+        .and_then(|c| {
+            use chrono::DateTime;
+            DateTime::parse_from_rfc3339(c)
+                .ok()
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
     let json_output: Vec<WorktreeJson> = worktrees
         .iter()
@@ -191,16 +202,7 @@ fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
         // Convert to relative path
         let path_display = make_relative_path(&info.path, repo_root);
 
-        let created = info
-            .created
-            .as_ref()
-            .and_then(|c| {
-                use chrono::DateTime;
-                DateTime::parse_from_rfc3339(c)
-                    .ok()
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-            })
-            .unwrap_or_else(|| "-".to_string());
+        let created = format_created_date(info.created.as_ref());
 
         let modified = info
             .modified
@@ -226,16 +228,7 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
             println!(); // Blank line between cards
         }
 
-        let created = info
-            .created
-            .as_ref()
-            .and_then(|c| {
-                use chrono::DateTime;
-                DateTime::parse_from_rfc3339(c)
-                    .ok()
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-            })
-            .unwrap_or_else(|| "-".to_string());
+        let created = format_created_date(info.created.as_ref());
 
         let modified = info
             .modified
