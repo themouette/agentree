@@ -49,7 +49,7 @@ $ agentree agent my-branch --agent <TAB>
 claude    opencode
 
 $ agentree create new --backend <TAB>
-local    claude-vm
+local    claude-vm    docker-sandbox
 
 # Positional branch arguments: type the branch name directly (no tab completion)
 $ agentree shell my-branch
@@ -216,23 +216,98 @@ Which backend to use by default.
 
 **Type**: String (enum)
 **Default**: `"local"`
-**Options**: `"local"`, `"claude-vm"`
+**Options**: `"local"`, `"claude-vm"`, `"docker-sandbox"`
 **Example**:
 ```toml
 [backend]
-default = "claude-vm"
+default = "docker-sandbox"
 ```
 
 **Backend Descriptions**:
 
-| Backend | Isolation | Binary Required | Use Case |
-|---------|-----------|-----------------|----------|
-| `local` | None | ❌ No | Trusted code, fast iteration |
-| `claude-vm` | Lima VM | ✅ `claude-vm` | Untrusted code, full system isolation |
+| Backend | Isolation | Binary Required | Platform | Use Case |
+|---------|-----------|-----------------|----------|----------|
+| `local` | None | ❌ No | All | Trusted code, fast iteration |
+| `claude-vm` | Lima VM | ✅ `claude-vm` | All | Untrusted code, full system isolation |
+| `docker-sandbox` | MicroVM (Docker) | ✅ Docker Desktop 4.58+ | macOS/Windows | AI agents on untrusted code, fast boot |
 
 **Override per command**:
 ```bash
-agentree create feature --backend claude-vm
+agentree create feature --backend docker-sandbox
+```
+
+**See also**: [Docker Sandbox Backend Documentation](backends/docker-sandbox.md)
+
+### `[docker-sandbox]` Section
+
+Configuration options specific to the Docker Sandbox backend.
+
+#### `binary` (optional)
+
+Custom path to the Docker binary.
+
+**Type**: String (path)
+**Default**: `"docker"` (from PATH)
+**Example**:
+```toml
+[docker-sandbox]
+binary = "/usr/local/bin/docker"
+```
+
+#### `network_policy` (optional)
+
+Network policy for sandboxes. Available policies depend on Docker Desktop configuration.
+
+**Type**: String
+**Default**: None (uses Docker default)
+**Example**:
+```toml
+[docker-sandbox]
+network_policy = "restricted"
+```
+
+#### `persistent` (optional)
+
+Whether to keep sandboxes running between commands. When enabled, subsequent workspace launches are much faster (~1-2s vs ~10-30s).
+
+**Type**: Boolean
+**Default**: `true`
+**Example**:
+```toml
+[docker-sandbox]
+persistent = true  # Faster launches, uses more resources
+# persistent = false  # Clean slate each time, slower
+```
+
+#### `mount_main_git` (optional)
+
+⚠️ **Note**: This option has no effect on the `docker-sandbox` backend. Docker Sandboxes do not support custom volume mounts, so the main repo's `.git` directory cannot be mounted separately.
+
+Whether to mount the main repository's `.git` directory for worktrees. When enabled (on supported backends like `claude-vm`), git commands work properly inside the sandbox.
+
+**Type**: Boolean
+**Default**: `true`
+**Supported backends**: `claude-vm` only (not `docker-sandbox`)
+**Example**:
+```toml
+[claude-vm]
+mount_main_git = true  # Enable git commands in worktrees (claude-vm only)
+# mount_main_git = false  # Stricter isolation, but git won't work
+```
+
+**Full example**:
+```toml
+[backend]
+default = "docker-sandbox"
+
+[docker-sandbox]
+binary = "docker"
+persistent = true
+network_policy = "restricted"
+
+# For claude-vm backend:
+[claude-vm]
+mount_main_git = true  # Enables git worktree support
 ```
 
 ### `[agent]` Section

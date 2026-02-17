@@ -1,3 +1,4 @@
+use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -19,6 +20,38 @@ pub struct RemoveArgs {
     pub force: bool,
 }
 
+/// Cleanup backend resources for a workspace if applicable
+///
+/// This function attempts to cleanup backend-specific resources (like Docker sandboxes)
+/// after a worktree is removed. It's called opportunistically and errors are logged
+/// but not propagated to avoid failing the worktree removal.
+fn cleanup_backend_resources(
+    workspace_path: &std::path::Path,
+    backend_kind: BackendKind,
+    config: &config::Config,
+) {
+    match backend_kind {
+        BackendKind::DockerSandbox => {
+            // Create docker-sandbox backend and attempt cleanup
+            let mut backend = DockerSandboxBackend::new();
+
+            if let Some(docker_binary) = config.docker_sandbox.binary.as_ref() {
+                backend = backend.with_binary(docker_binary.clone());
+            }
+
+            let backend = backend.with_config(config.docker_sandbox.clone());
+
+            if let Err(e) = backend.remove_sandbox(workspace_path) {
+                // Log but don't fail - sandbox may already be removed or not exist
+                eprintln!("Note: Could not cleanup Docker sandbox: {}", e);
+            }
+        }
+        BackendKind::Local | BackendKind::ClaudeVm => {
+            // No backend-specific cleanup needed
+        }
+    }
+}
+
 pub fn execute(args: RemoveArgs) -> Result<()> {
     // Check git version
     validation::check_git_version()?;
@@ -30,8 +63,8 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         )
     })?;
 
-    // Load config (for consistency and future use)
-    let _config = config::load(&repo_root)?;
+    // Load config to determine backend and for cleanup
+    let config = config::load(&repo_root)?;
 
     // Handle --merged mode
     if let Some(base) = args.merged {
@@ -44,15 +77,24 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         // Find which merged branches have worktrees
         let mut removed_count = 0;
         for branch in merged_branches {
-            let has_worktree = worktrees
+            // Find the worktree path before deleting
+            let worktree_entry = worktrees
                 .iter()
-                .any(|e| e.branch.as_deref() == Some(&branch));
+                .find(|e| e.branch.as_deref() == Some(&branch));
 
-            if has_worktree {
+            if let Some(entry) = worktree_entry {
+                let workspace_path = entry.path.clone();
                 match operations::delete_worktree(&branch) {
                     Ok(_) => {
                         removed_count += 1;
                         println!("Removed worktree for branch '{}'", branch);
+
+                        // Cleanup backend resources (e.g., Docker sandboxes)
+                        cleanup_backend_resources(
+                            &workspace_path,
+                            config.effective_backend(),
+                            &config,
+                        );
                     }
                     Err(e) => {
                         eprintln!("Warning: Failed to remove worktree for '{}': {}", branch, e);
@@ -72,9 +114,24 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         ));
     }
 
+    // Get worktrees to find paths before deletion
+    let worktrees = recovery::ensure_clean_state()?;
+
     for branch in &args.branches {
+        // Find the workspace path before deleting
+        let worktree_entry = worktrees
+            .iter()
+            .find(|e| e.branch.as_deref() == Some(branch.as_str()));
+
+        let workspace_path = worktree_entry.map(|e| e.path.clone());
+
         operations::delete_worktree(branch)?;
         println!("Removed worktree for branch '{}'", branch);
+
+        // Cleanup backend resources if we found the workspace path
+        if let Some(path) = workspace_path {
+            cleanup_backend_resources(&path, config.effective_backend(), &config);
+        }
     }
 
     Ok(())

@@ -5,11 +5,13 @@ use std::path::Path;
 use std::str::FromStr;
 
 mod claude_vm;
+mod docker_sandbox;
 mod exec;
 mod local;
 mod registry;
 
 pub use claude_vm::ClaudeVmBackend;
+pub use docker_sandbox::DockerSandboxBackend;
 pub use exec::{run_host_command, run_interactive, ExecOutput};
 pub use local::LocalBackend;
 pub use registry::BackendRegistry;
@@ -20,6 +22,7 @@ pub use registry::BackendRegistry;
 pub enum BackendKind {
     Local,
     ClaudeVm,
+    DockerSandbox,
 }
 
 impl fmt::Display for BackendKind {
@@ -27,6 +30,7 @@ impl fmt::Display for BackendKind {
         match self {
             BackendKind::Local => write!(f, "local"),
             BackendKind::ClaudeVm => write!(f, "claude-vm"),
+            BackendKind::DockerSandbox => write!(f, "docker-sandbox"),
         }
     }
 }
@@ -38,9 +42,14 @@ impl FromStr for BackendKind {
         match s.to_lowercase().as_str() {
             "local" => Ok(BackendKind::Local),
             "claude-vm" | "claudevm" => Ok(BackendKind::ClaudeVm),
+            "docker-sandbox" | "dockersandbox" => Ok(BackendKind::DockerSandbox),
             _ => Err(AgentreeError::BackendNotFound {
                 name: s.to_string(),
-                available: vec!["local".to_string(), "claude-vm".to_string()],
+                available: vec![
+                    "local".to_string(),
+                    "claude-vm".to_string(),
+                    "docker-sandbox".to_string(),
+                ],
             }),
         }
     }
@@ -71,6 +80,7 @@ pub trait Backend {
 pub enum BackendType {
     Local(LocalBackend),
     ClaudeVm(ClaudeVmBackend),
+    DockerSandbox(DockerSandboxBackend),
 }
 
 impl BackendType {
@@ -84,11 +94,17 @@ impl BackendType {
         BackendType::ClaudeVm(ClaudeVmBackend::new())
     }
 
+    /// Create a new docker-sandbox backend
+    pub fn docker_sandbox() -> Self {
+        BackendType::DockerSandbox(DockerSandboxBackend::new())
+    }
+
     /// Create a backend from a BackendKind
     pub fn from_kind(kind: BackendKind) -> Self {
         match kind {
             BackendKind::Local => Self::local(),
             BackendKind::ClaudeVm => Self::claude_vm(),
+            BackendKind::DockerSandbox => Self::docker_sandbox(),
         }
     }
 }
@@ -98,6 +114,7 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.shell(workspace_path),
             BackendType::ClaudeVm(backend) => backend.shell(workspace_path),
+            BackendType::DockerSandbox(backend) => backend.shell(workspace_path),
         }
     }
 
@@ -105,6 +122,7 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.exec(workspace_path, command),
             BackendType::ClaudeVm(backend) => backend.exec(workspace_path, command),
+            BackendType::DockerSandbox(backend) => backend.exec(workspace_path, command),
         }
     }
 
@@ -112,6 +130,7 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.agent(workspace_path, agent, flags),
             BackendType::ClaudeVm(backend) => backend.agent(workspace_path, agent, flags),
+            BackendType::DockerSandbox(backend) => backend.agent(workspace_path, agent, flags),
         }
     }
 
@@ -119,6 +138,7 @@ impl Backend for BackendType {
         match self {
             BackendType::Local(backend) => backend.name(),
             BackendType::ClaudeVm(backend) => backend.name(),
+            BackendType::DockerSandbox(backend) => backend.name(),
         }
     }
 }
@@ -131,6 +151,7 @@ mod tests {
     fn test_backend_kind_display() {
         assert_eq!(BackendKind::Local.to_string(), "local");
         assert_eq!(BackendKind::ClaudeVm.to_string(), "claude-vm");
+        assert_eq!(BackendKind::DockerSandbox.to_string(), "docker-sandbox");
     }
 
     #[test]
@@ -150,6 +171,18 @@ mod tests {
             BackendKind::from_str("CLAUDE-VM").unwrap(),
             BackendKind::ClaudeVm
         );
+        assert_eq!(
+            BackendKind::from_str("docker-sandbox").unwrap(),
+            BackendKind::DockerSandbox
+        );
+        assert_eq!(
+            BackendKind::from_str("dockersandbox").unwrap(),
+            BackendKind::DockerSandbox
+        );
+        assert_eq!(
+            BackendKind::from_str("DOCKER-SANDBOX").unwrap(),
+            BackendKind::DockerSandbox
+        );
     }
 
     #[test]
@@ -159,7 +192,10 @@ mod tests {
         match result {
             Err(AgentreeError::BackendNotFound { name, available }) => {
                 assert_eq!(name, "invalid");
-                assert_eq!(available.len(), 2);
+                assert_eq!(available.len(), 3);
+                assert!(available.contains(&"local".to_string()));
+                assert!(available.contains(&"claude-vm".to_string()));
+                assert!(available.contains(&"docker-sandbox".to_string()));
             }
             _ => panic!("Expected BackendNotFound error"),
         }
@@ -175,5 +211,11 @@ mod tests {
     fn test_backend_type_from_kind_claude_vm() {
         let backend = BackendType::from_kind(BackendKind::ClaudeVm);
         assert_eq!(backend.name(), "claude-vm");
+    }
+
+    #[test]
+    fn test_backend_type_from_kind_docker_sandbox() {
+        let backend = BackendType::from_kind(BackendKind::DockerSandbox);
+        assert_eq!(backend.name(), "docker-sandbox");
     }
 }

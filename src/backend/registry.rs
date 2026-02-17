@@ -47,6 +47,24 @@ impl BackendRegistry {
             },
         );
 
+        // Docker Sandbox backend
+        backends.insert(
+            BackendKind::DockerSandbox,
+            BackendInfo {
+                binary_name: "docker".to_string(),
+                min_version: Some(
+                    semver::VersionReq::parse(">=29.1.5")
+                        .expect("Valid version requirement for docker-sandbox"),
+                ),
+                install_instructions:
+                    "Download Docker Desktop 4.58+ from: https://www.docker.com/products/docker-desktop/"
+                        .to_string(),
+                update_instructions:
+                    "Update Docker Desktop to 4.58+ from: https://www.docker.com/products/docker-desktop/"
+                        .to_string(),
+            },
+        );
+
         Self { backends }
     }
 
@@ -57,13 +75,22 @@ impl BackendRegistry {
             return Ok(());
         }
 
+        // Docker Sandbox has special validation requirements
+        if matches!(kind, BackendKind::DockerSandbox) {
+            return self.validate_docker_sandbox();
+        }
+
         // Get backend info
         let info = self
             .backends
             .get(kind)
             .ok_or_else(|| AgentreeError::BackendNotFound {
                 name: kind.to_string(),
-                available: vec!["local".to_string(), "claude-vm".to_string()],
+                available: vec![
+                    "local".to_string(),
+                    "claude-vm".to_string(),
+                    "docker-sandbox".to_string(),
+                ],
             })?;
 
         // Check if binary exists in PATH
@@ -97,6 +124,67 @@ impl BackendRegistry {
         Ok(())
     }
 
+    /// Special validation for Docker Sandbox backend
+    fn validate_docker_sandbox(&self) -> Result<()> {
+        // Check platform - microVMs not supported on Linux
+        #[cfg(target_os = "linux")]
+        return Err(AgentreeError::DockerSandboxLinuxNotSupported);
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            // Get backend info
+            let info = self
+                .backends
+                .get(&BackendKind::DockerSandbox)
+                .expect("DockerSandbox backend should be registered");
+
+            // Check if docker binary exists in PATH
+            if which::which(&info.binary_name).is_err() {
+                return Err(AgentreeError::BackendBinaryNotFound {
+                    backend: "docker-sandbox".to_string(),
+                    binary: info.binary_name.clone(),
+                    install_instructions: info.install_instructions.clone(),
+                });
+            }
+
+            // Check if Docker daemon is running
+            let info_check = std::process::Command::new(&info.binary_name)
+                .arg("info")
+                .output();
+
+            match info_check {
+                Ok(output) if !output.status.success() => {
+                    return Err(AgentreeError::DockerNotRunning);
+                }
+                Err(_) => {
+                    return Err(AgentreeError::DockerNotRunning);
+                }
+                _ => {}
+            }
+
+            // Check Docker version
+            if let Some(ref min_version) = info.min_version {
+                let version_str = get_binary_version(&info.binary_name, "--version")?;
+                let version = semver::Version::parse(&version_str).map_err(|e| {
+                    AgentreeError::VersionParse {
+                        version: version_str.clone(),
+                        error: e.to_string(),
+                    }
+                })?;
+
+                if !min_version.matches(&version) {
+                    return Err(AgentreeError::DockerSandboxNotSupported {
+                        current: version.to_string(),
+                        minimum_engine: "29.1.5".to_string(),
+                        minimum_desktop: "4.58".to_string(),
+                    });
+                }
+            }
+
+            Ok(())
+        }
+    }
+
     /// Create a backend after validation
     pub fn create_backend(&self, kind: &BackendKind) -> Result<crate::backend::BackendType> {
         self.validate(kind)?;
@@ -120,7 +208,8 @@ mod tests {
         let registry = BackendRegistry::new();
         assert!(registry.backends.contains_key(&BackendKind::Local));
         assert!(registry.backends.contains_key(&BackendKind::ClaudeVm));
-        assert_eq!(registry.backends.len(), 2);
+        assert!(registry.backends.contains_key(&BackendKind::DockerSandbox));
+        assert_eq!(registry.backends.len(), 3);
     }
 
     #[test]
@@ -191,6 +280,38 @@ mod tests {
     #[test]
     fn test_default_trait() {
         let registry = BackendRegistry::default();
-        assert_eq!(registry.backends.len(), 2);
+        assert_eq!(registry.backends.len(), 3);
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_validate_docker_sandbox_fails_on_linux() {
+        let registry = BackendRegistry::new();
+        let result = registry.validate(&BackendKind::DockerSandbox);
+        assert!(result.is_err());
+        match result {
+            Err(AgentreeError::DockerSandboxLinuxNotSupported) => {
+                // Expected
+            }
+            _ => panic!("Expected DockerSandboxLinuxNotSupported error"),
+        }
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn test_validate_docker_sandbox_checks_binary() {
+        let registry = BackendRegistry::new();
+        // This test runs on macOS/Windows
+        // If docker is not installed, we should get BackendBinaryNotFound
+        if which::which("docker").is_err() {
+            let result = registry.validate(&BackendKind::DockerSandbox);
+            assert!(result.is_err());
+            match result {
+                Err(AgentreeError::BackendBinaryNotFound { backend, .. }) => {
+                    assert_eq!(backend, "docker-sandbox");
+                }
+                _ => panic!("Expected BackendBinaryNotFound error"),
+            }
+        }
     }
 }

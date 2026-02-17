@@ -985,3 +985,182 @@ fn test_editor_help_shows_options() {
 // completion simplification (commit 720a19c) removed positional branch completion entirely.
 // The test was checking for implementation details (case statements) that no longer exist.
 // Completions now focus on flag values (--base, --agent, --backend) which are tested elsewhere.
+
+// ===== Docker Sandbox Backend Tests =====
+
+/// Helper to check if Docker is available and running
+fn is_docker_available() -> bool {
+    // Check if docker binary exists
+    if which::which("docker").is_err() {
+        return false;
+    }
+
+    // Check if Docker daemon is running
+    let output = Command::new("docker").arg("info").output();
+
+    match output {
+        Ok(output) => output.status.success(),
+        Err(_) => false,
+    }
+}
+
+/// Helper to check if we're on a Linux system
+fn is_linux() -> bool {
+    cfg!(target_os = "linux")
+}
+
+#[test]
+fn test_docker_sandbox_backend_validation_linux() {
+    if !is_linux() {
+        // Skip on non-Linux platforms
+        return;
+    }
+
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Try to create with docker-sandbox backend on Linux
+    let output = test_repo.agentree(&["create", "docker-test", "--backend", "docker-sandbox"]);
+
+    // Should fail on Linux
+    assert!(
+        !output.status.success(),
+        "docker-sandbox should not be supported on Linux"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("not supported on Linux") || stderr.contains("microVM"),
+        "Error should mention Linux not being supported: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_docker_sandbox_backend_validation_not_installed() {
+    if is_linux() {
+        // Skip on Linux - it will fail with different error
+        return;
+    }
+
+    if is_docker_available() {
+        // Skip if Docker is actually installed
+        return;
+    }
+
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Try to create with docker-sandbox backend when Docker not installed
+    let output = test_repo.agentree(&["create", "docker-test", "--backend", "docker-sandbox"]);
+
+    // Should fail with binary not found
+    assert!(
+        !output.status.success(),
+        "docker-sandbox should fail when Docker not installed"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("docker") || stderr.contains("Docker Desktop"),
+        "Error should mention Docker installation: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_docker_sandbox_config() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a config file with docker-sandbox settings
+    let config_content = r#"
+[backend]
+default = "docker-sandbox"
+
+[docker-sandbox]
+binary = "docker"
+persistent = true
+"#;
+
+    let config_path = test_repo.path().join(".agentree.toml");
+    std::fs::write(&config_path, config_content).expect("Failed to write config");
+
+    // Create workspace - will fail if Docker not available, but that's okay
+    // We're testing that the config is parsed correctly
+    let output = test_repo.agentree(&["create", "docker-config-test"]);
+
+    // If it failed, check it's for Docker reasons, not config parsing
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Should NOT be a config parse error
+        assert!(
+            !stderr.contains("parse") && !stderr.contains("TOML"),
+            "Should not be a config parse error: {}",
+            stderr
+        );
+        // Should be Docker-related error (unless on Linux)
+        if !is_linux() {
+            assert!(
+                stderr.contains("Docker") || stderr.contains("docker"),
+                "Error should be Docker-related: {}",
+                stderr
+            );
+        }
+    }
+}
+
+#[test]
+fn test_docker_sandbox_backend_cli_flag() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Test that --backend docker-sandbox is accepted (validation will fail if Docker not available)
+    let output = test_repo.agentree(&["create", "docker-cli-test", "--backend", "docker-sandbox"]);
+
+    // If it failed, check it's not because the backend name wasn't recognized
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("Unknown backend") && !stderr.contains("invalid backend"),
+            "Backend name should be recognized even if Docker not available: {}",
+            stderr
+        );
+    }
+}
+
+#[test]
+fn test_docker_sandbox_backend_case_insensitive() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Test that dockersandbox (no hyphen) is accepted
+    let output = test_repo.agentree(&["create", "docker-nohyphen", "--backend", "dockersandbox"]);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        // Should not be an "unknown backend" error
+        assert!(
+            !stderr.contains("Unknown backend"),
+            "dockersandbox should be recognized as valid backend name: {}",
+            stderr
+        );
+    }
+
+    // Test uppercase
+    let output = test_repo.agentree(&["create", "docker-upper", "--backend", "DOCKER-SANDBOX"]);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains("Unknown backend"),
+            "DOCKER-SANDBOX should be recognized: {}",
+            stderr
+        );
+    }
+}
