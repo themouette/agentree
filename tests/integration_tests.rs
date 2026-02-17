@@ -13,8 +13,8 @@ fn test_create_and_list_worktree() {
     let output = test_repo.agentree(&["create", "feature-test"]);
     assert!(output.status.success(), "create command should succeed");
 
-    // List worktrees
-    let output = test_repo.agentree(&["list"]);
+    // List worktrees with table format
+    let output = test_repo.agentree(&["list", "--format", "table"]);
     assert!(output.status.success(), "list command should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -458,8 +458,8 @@ fn test_list_shows_created_column() {
     let output = test_repo.agentree(&["create", "created-test"]);
     assert!(output.status.success(), "create should succeed");
 
-    // List worktrees
-    let output = test_repo.agentree(&["list"]);
+    // List worktrees with table format
+    let output = test_repo.agentree(&["list", "--format", "table"]);
     assert!(output.status.success(), "list should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
