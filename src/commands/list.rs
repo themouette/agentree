@@ -194,7 +194,7 @@ fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
 fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
     // Header with 120 max width
     println!(
-        "{:<25} {:<45} {:<12} {:<18} {:<15}",
+        "{:<25} {:<50} {:<12} {:<18} {:<15}",
         "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED"
     );
 
@@ -210,9 +210,9 @@ fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
             .unwrap_or_else(|| "Unknown".to_string());
 
         println!(
-            "{:<25} {:<45} {:<12} {:<18} {:<15}",
+            "{:<25} {:<50} {:<12} {:<18} {:<15}",
             truncate(&info.branch, 25),
-            truncate(&path_display, 45),
+            truncate(&path_display, 50),
             truncate(&info.backend, 12),
             created,
             modified
