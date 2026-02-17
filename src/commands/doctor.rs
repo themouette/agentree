@@ -89,7 +89,7 @@ pub fn execute(args: DoctorArgs) -> Result<()> {
         let fix_report = doctor::fix_issues_interactive(&report)?;
 
         // Display fix summary
-        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        eprintln!("{}", doctor::SEPARATOR);
         eprintln!("Fix Summary:");
         eprintln!("  Fixed:   {}", fix_report.fixed);
         eprintln!("  Skipped: {}", fix_report.skipped);
@@ -103,7 +103,7 @@ pub fn execute(args: DoctorArgs) -> Result<()> {
             }
         }
 
-        eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        eprintln!("{}", doctor::SEPARATOR);
 
         // Exit with error if any fixes failed
         if !fix_report.failed.is_empty() {

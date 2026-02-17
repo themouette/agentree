@@ -11,6 +11,9 @@ use std::time::SystemTime;
 /// This prevents unbounded recursion and handles symlink cycles
 const MAX_SCAN_DEPTH: usize = 10;
 
+/// Box-drawing separator line for visual output formatting
+pub const SEPARATOR: &str = "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━";
+
 /// Types of worktree issues that can be detected
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -242,7 +245,7 @@ pub fn display_issue(issue: &WorktreeIssue, index: usize, total: usize) {
         IssueType::BrokenMetadata => "[ERROR]",
     };
 
-    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    eprintln!("{}", SEPARATOR);
     eprintln!(
         "Issue {}/{}: {} {}",
         index + 1,
@@ -257,7 +260,7 @@ pub fn display_issue(issue: &WorktreeIssue, index: usize, total: usize) {
     eprintln!();
     eprintln!("  {}", issue.description);
     eprintln!("  Fix: {}", issue.fix_description);
-    eprintln!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+    eprintln!("{}", SEPARATOR);
     eprintln!();
 }
 
