@@ -263,9 +263,13 @@ fn prompt_yes_no(prompt: &str) -> Result<bool> {
     let _ = io::stdout().flush();
 
     let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .map_err(|e| AgentreeError::Worktree(format!("Failed to read user input: {}", e)))?;
+    io::stdin().read_line(&mut input).map_err(|e| {
+        if e.kind() == io::ErrorKind::UnexpectedEof {
+            AgentreeError::Worktree("User cancelled (Ctrl+C or Ctrl+D)".to_string())
+        } else {
+            AgentreeError::Worktree(format!("Failed to read user input: {}", e))
+        }
+    })?;
 
     let input = input.trim().to_lowercase();
     Ok(input == "y" || input == "yes")
