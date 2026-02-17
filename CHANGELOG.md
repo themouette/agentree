@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Docker Sandbox backend (`docker-sandbox`) for microVM-based isolation:
+  - Hypervisor-level isolation using Docker Desktop's sandbox feature (Engine 29.1.5+)
+  - Platform support: macOS and Windows (microVMs not available on Linux)
+  - Fast startup: ~10-30s cold start, ~1-2s for subsequent launches with persistent sandboxes
+  - Automatic git worktree support with `.git` directory mounting
+  - Configuration options: custom binary path, network policies, persistence mode
+  - Platform validation at initialization (fails fast on Linux with clear error)
+  - Automatic sandbox cleanup when removing workspaces
+  - Comprehensive documentation in `docs/backends/docker-sandbox.md`
+- Backend validation during workspace initialization for all commands
+- Backend value completion now includes `docker-sandbox` option
 - Multiple output formats for `list` command via `--format` flag:
   - `two-lines` (default): Summary line with absolute path on second line
   - `table`: Compact table format with relative paths (120 char width)

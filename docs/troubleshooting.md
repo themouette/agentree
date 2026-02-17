@@ -354,6 +354,144 @@ agentree shell feature --backend local
 agentree --verbose shell feature
 ```
 
+### Docker Sandbox Issues
+
+#### "Docker is not running"
+
+**Problem**: Docker Desktop is not started.
+
+**Example**:
+```
+❌ Docker daemon is not running. Please start Docker Desktop and try again.
+   Check status with: docker info
+```
+
+**Solution**:
+
+```bash
+# Start Docker Desktop from Applications (macOS/Windows)
+
+# Verify Docker is running
+docker info
+
+# Retry operation
+agentree create feature --backend docker-sandbox
+```
+
+#### "Docker version does not support sandboxes"
+
+**Problem**: Docker version is too old (need Engine 29.1.5+ / Desktop 4.58+).
+
+**Example**:
+```
+❌ Docker version 28.0.0 does not support sandboxes.
+   Minimum required: Engine 29.1.5 / Desktop 4.58
+   Update Docker Desktop: https://www.docker.com/products/docker-desktop/
+```
+
+**Solution**:
+
+```bash
+# Check current version
+docker --version
+
+# Update Docker Desktop
+# Download from: https://www.docker.com/products/docker-desktop/
+
+# Verify version after update
+docker --version  # Should show 29.1.5 or higher
+```
+
+#### "Docker Sandboxes are not supported on Linux"
+
+**Problem**: Trying to use docker-sandbox on Linux (microVMs not available).
+
+**Example**:
+```
+❌ Docker Sandboxes are not supported on Linux.
+   Docker Sandboxes use microVMs which require macOS or Windows.
+   Consider using the 'claude-vm' backend instead for VM isolation on Linux.
+```
+
+**Solution**:
+
+```bash
+# Use claude-vm backend instead
+agentree create feature --backend claude-vm
+
+# Or use local backend (no isolation)
+agentree create feature --backend local
+
+# Update config to avoid this error
+echo '[backend]
+default = "claude-vm"' > ~/.agentree.toml
+```
+
+#### "Docker sandbox not found"
+
+**Problem**: Sandbox was removed outside of agentree.
+
+**Example**:
+```
+❌ Docker sandbox 'agentree-feature-a1b2c3d4' not found.
+   The sandbox may have been removed outside of agentree.
+   Try running: agentree remove feature && agentree create feature
+```
+
+**Solution**:
+
+```bash
+# Remove workspace and recreate
+agentree remove feature
+agentree create feature --backend docker-sandbox
+
+# Or list all sandboxes manually
+docker sandbox ls | grep agentree
+
+# Clean up manually if needed
+docker sandbox rm -f agentree-feature-a1b2c3d4
+```
+
+#### Slow first launch with docker-sandbox
+
+**Expected behavior**: First launch takes 10-30 seconds to create the microVM.
+
+**Not an error** - subsequent launches are fast (~1-2s) when using persistent sandboxes.
+
+**To verify persistence is working**:
+
+```toml
+# Check config
+[docker-sandbox]
+persistent = true  # Should be true (default)
+```
+
+**To force recreation**:
+
+```bash
+agentree remove feature
+agentree create feature --backend docker-sandbox
+```
+
+#### Manual sandbox cleanup
+
+**Problem**: Want to clean up all docker-sandbox sandboxes.
+
+**Solution**:
+
+```bash
+# List all agentree sandboxes
+docker sandbox ls | grep agentree
+
+# Remove specific sandbox
+docker sandbox rm -f agentree-feature-a1b2c3d4
+
+# Remove all agentree sandboxes
+docker sandbox ls --format "{{.Name}}" | grep '^agentree-' | xargs -I {} docker sandbox rm -f {}
+```
+
+**See also**: [Docker Sandbox Backend Documentation](backends/docker-sandbox.md)
+
 ## Configuration Issues
 
 ### "Failed to parse config"

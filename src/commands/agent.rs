@@ -12,7 +12,7 @@ pub struct AgentArgs {
     #[arg(last = true)]
     pub flags: Vec<String>,
 
-    /// Agent to use (overrides config). Required for 'local' backend, optional for 'claude-vm'
+    /// Agent to use (overrides config). Required for 'local' and 'docker-sandbox' backends, optional for 'claude-vm'
     #[arg(long)]
     pub agent: Option<String>,
 }
