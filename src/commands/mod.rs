@@ -4,6 +4,7 @@ pub mod clean;
 pub mod common;
 pub mod completion;
 pub mod create;
+pub mod doctor;
 pub mod editor;
 pub mod exec;
 pub mod list;

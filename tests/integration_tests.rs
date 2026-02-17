@@ -1426,3 +1426,201 @@ fn test_error_message_includes_path() {
         stderr
     );
 }
+
+// ===== Doctor Command Tests =====
+
+#[test]
+fn test_doctor_clean_repo() {
+    // Clean up any leftover worktrees from previous tests
+    let _ = std::fs::remove_dir_all("/tmp/worktrees");
+
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    test_repo.agentree(&["create", "test-branch"]);
+
+    // Run doctor on clean repo
+    let output = test_repo.agentree(&["doctor"]);
+    assert!(output.status.success(), "doctor should succeed on clean repo");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No issues found") || stdout.contains("healthy"),
+        "Should indicate no issues: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_doctor_finds_orphaned_directory() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "orphan-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Get the worktree path
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("orphan-test");
+
+    // Remove git metadata directly to create orphaned directory
+    // (prune only works if directory is already gone)
+    let metadata_path = test_repo.path().join(".git/worktrees/orphan-test");
+    std::fs::remove_dir_all(&metadata_path).expect("Failed to remove git metadata");
+
+    // Verify directory still exists
+    assert!(
+        worktree_path.exists(),
+        "Orphaned directory should still exist"
+    );
+
+    // Run doctor - should detect orphaned directory
+    let output = test_repo.agentree(&["doctor"]);
+
+    // Doctor should exit with error when issues found
+    assert!(
+        !output.status.success(),
+        "doctor should exit with error when issues found"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Orphaned Directory") || stderr.contains("orphaned_directory"),
+        "Should detect orphaned directory: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("orphan-test") || stderr.contains(&worktree_path.display().to_string()),
+        "Should mention the orphaned path: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_doctor_finds_broken_metadata() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "broken-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Get the worktree path
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("broken-test");
+
+    // Delete the directory but keep git metadata
+    std::fs::remove_dir_all(&worktree_path).expect("Failed to remove worktree directory");
+
+    // Run doctor - should detect broken metadata
+    let output = test_repo.agentree(&["doctor"]);
+
+    // Should exit with error
+    assert!(
+        !output.status.success(),
+        "doctor should exit with error when issues found"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Broken Metadata") || stderr.contains("broken_metadata"),
+        "Should detect broken metadata: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("broken-test") || stderr.contains(&worktree_path.display().to_string()),
+        "Should mention the broken worktree: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_doctor_json_output() {
+    // Clean up any leftover worktrees from previous tests
+    let _ = std::fs::remove_dir_all("/tmp/worktrees");
+
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Run doctor with JSON format on clean repo
+    let output = test_repo.agentree(&["doctor", "--format", "json"]);
+    assert!(output.status.success(), "doctor should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Parse JSON
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // Verify structure
+    assert!(json.get("scan_time").is_some(), "Should have scan_time");
+    assert!(json.get("issues").is_some(), "Should have issues array");
+    assert!(json.get("summary").is_some(), "Should have summary");
+
+    // Verify summary structure
+    let summary = json.get("summary").unwrap();
+    assert!(summary.get("total").is_some(), "Summary should have total");
+    assert!(summary.get("errors").is_some(), "Summary should have errors");
+    assert!(
+        summary.get("warnings").is_some(),
+        "Summary should have warnings"
+    );
+
+    // For clean repo, should have 0 issues
+    let total = summary.get("total").unwrap().as_u64().unwrap();
+    assert_eq!(total, 0, "Clean repo should have 0 issues");
+}
+
+#[test]
+fn test_doctor_json_with_issues() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create orphaned directory
+    let output = test_repo.agentree(&["create", "json-orphan"]);
+    assert!(output.status.success());
+
+    // Remove git metadata directly to create orphaned directory
+    let metadata_path = test_repo.path().join(".git/worktrees/json-orphan");
+    std::fs::remove_dir_all(&metadata_path).expect("Failed to remove git metadata");
+
+    // Run doctor with JSON format
+    let output = test_repo.agentree(&["doctor", "--format", "json"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // Verify issues array is not empty
+    let issues = json.get("issues").unwrap().as_array().unwrap();
+    assert!(
+        !issues.is_empty(),
+        "Should have at least one issue detected"
+    );
+
+    // Verify issue structure
+    let first_issue = &issues[0];
+    assert!(
+        first_issue.get("type").is_some(),
+        "Issue should have type"
+    );
+    assert!(first_issue.get("path").is_some(), "Issue should have path");
+    assert!(
+        first_issue.get("description").is_some(),
+        "Issue should have description"
+    );
+    assert!(first_issue.get("fix").is_some(), "Issue should have fix");
+}

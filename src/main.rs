@@ -1,5 +1,6 @@
 use agentree::commands::{
-    agent, cd, clean, completion, create, editor, exec, list, remove, shell, shell_init, update,
+    agent, cd, clean, completion, create, doctor, editor, exec, list, remove, shell, shell_init,
+    update,
 };
 use agentree::constants::DEFAULT_AGENTS;
 use agentree::version;
@@ -48,6 +49,9 @@ enum Command {
 
     /// Clean orphaned worktrees
     Clean(clean::CleanArgs),
+
+    /// Check worktree health and fix issues
+    Doctor(doctor::DoctorArgs),
 
     /// Open a shell in workspace (auto-creates if needed)
     Shell(shell::ShellArgs),
@@ -104,6 +108,7 @@ fn main() {
         Command::List(args) => list::execute(args),
         Command::Remove(args) => remove::execute(args),
         Command::Clean(args) => clean::execute(args),
+        Command::Doctor(args) => doctor::execute(args),
         Command::Shell(args) => shell::execute(args),
         Command::ShellInit(args) => {
             if args.with_completion {
