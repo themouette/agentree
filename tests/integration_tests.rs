@@ -13,8 +13,8 @@ fn test_create_and_list_worktree() {
     let output = test_repo.agentree(&["create", "feature-test"]);
     assert!(output.status.success(), "create command should succeed");
 
-    // List worktrees
-    let output = test_repo.agentree(&["list"]);
+    // List worktrees with table format
+    let output = test_repo.agentree(&["list", "--format", "table"]);
     assert!(output.status.success(), "list command should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -458,8 +458,8 @@ fn test_list_shows_created_column() {
     let output = test_repo.agentree(&["create", "created-test"]);
     assert!(output.status.success(), "create should succeed");
 
-    // List worktrees
-    let output = test_repo.agentree(&["list"]);
+    // List worktrees with table format
+    let output = test_repo.agentree(&["list", "--format", "table"]);
     assert!(output.status.success(), "list should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -469,6 +469,226 @@ fn test_list_shows_created_column() {
         stdout.contains("CREATED"),
         "Table header should include CREATED column"
     );
+}
+
+#[test]
+fn test_list_default_format() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "default-format-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List worktrees without format flag (should use default two-lines format)
+    let output = test_repo.agentree(&["list"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify two-lines format: header line + branch line + arrow path line
+    assert!(
+        stdout.contains("BRANCH"),
+        "Should have BRANCH column header"
+    );
+    assert!(
+        stdout.contains("default-format-test"),
+        "Should show branch name"
+    );
+    assert!(stdout.contains("→"), "Should show arrow for path");
+}
+
+#[test]
+fn test_list_two_lines_format() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "two-lines-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List with explicit two-lines format
+    let output = test_repo.agentree(&["list", "--format", "two-lines"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify format has headers
+    assert!(stdout.contains("BRANCH"), "Should have BRANCH header");
+    assert!(stdout.contains("BACKEND"), "Should have BACKEND header");
+    assert!(stdout.contains("MODIFIED"), "Should have MODIFIED header");
+
+    // Verify branch is shown
+    assert!(stdout.contains("two-lines-test"), "Should show branch name");
+
+    // Verify arrow for absolute path
+    assert!(stdout.contains("→"), "Should show → for path line");
+}
+
+#[test]
+fn test_list_card_format() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "card-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List with card format
+    let output = test_repo.agentree(&["list", "--format", "card"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify card format has box drawing and labels
+    assert!(stdout.contains("┌─"), "Should have card box top");
+    assert!(stdout.contains("│"), "Should have card box sides");
+    assert!(stdout.contains("└─"), "Should have card box bottom");
+    assert!(stdout.contains("Path:"), "Should have Path label");
+    assert!(stdout.contains("Backend:"), "Should have Backend label");
+    assert!(stdout.contains("Created:"), "Should have Created label");
+    assert!(stdout.contains("Modified:"), "Should have Modified label");
+    assert!(stdout.contains("card-test"), "Should show branch name");
+}
+
+#[test]
+fn test_list_json_format() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "json-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List with json format
+    let output = test_repo.agentree(&["list", "--format", "json"]);
+    assert!(output.status.success(), "list should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Verify valid JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+
+    // Should be an array
+    assert!(parsed.is_array(), "JSON should be an array");
+
+    let array = parsed.as_array().unwrap();
+    assert!(!array.is_empty(), "Should have at least one worktree");
+
+    // Check first entry has expected fields
+    let first = &array[0];
+    assert!(first.get("branch").is_some(), "Should have branch field");
+    assert!(first.get("path").is_some(), "Should have path field");
+    assert!(first.get("backend").is_some(), "Should have backend field");
+    assert!(first.get("created").is_some(), "Should have created field");
+    assert!(
+        first.get("modified").is_some(),
+        "Should have modified field"
+    );
+
+    // Verify branch name
+    let branch = first.get("branch").unwrap().as_str().unwrap();
+    assert_eq!(branch, "json-test", "Branch should be json-test");
+}
+
+#[test]
+fn test_list_json_flag_deprecated() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "json-legacy-test"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // List with deprecated --json flag
+    let output = test_repo.agentree(&["list", "--json"]);
+    assert!(output.status.success(), "list with --json should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Should still produce valid JSON
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("Output should be valid JSON");
+    assert!(parsed.is_array(), "JSON should be an array");
+
+    // Should show deprecation warning
+    assert!(
+        stderr.contains("deprecated"),
+        "Should show deprecation warning"
+    );
+    assert!(
+        stderr.contains("--format=json"),
+        "Should suggest --format=json"
+    );
+}
+
+#[test]
+fn test_list_json_and_format_conflict() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Try using both --json and --format (should fail)
+    let output = test_repo.agentree(&["list", "--json", "--format", "table"]);
+    assert!(
+        !output.status.success(),
+        "Should fail with conflicting flags"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("conflict") || stderr.contains("cannot be used with"),
+        "Should show conflict error"
+    );
+}
+
+#[test]
+fn test_list_empty_with_formats() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // List with no worktrees - test each format handles empty state
+
+    // Two-lines format
+    let output = test_repo.agentree(&["list", "--format", "two-lines"]);
+    assert!(output.status.success(), "list should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No worktrees found"),
+        "Two-lines should show empty message"
+    );
+
+    // Table format
+    let output = test_repo.agentree(&["list", "--format", "table"]);
+    assert!(output.status.success(), "list should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No worktrees found"),
+        "Table should show empty message"
+    );
+
+    // Card format
+    let output = test_repo.agentree(&["list", "--format", "card"]);
+    assert!(output.status.success(), "list should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No worktrees found"),
+        "Card should show empty message"
+    );
+
+    // JSON format
+    let output = test_repo.agentree(&["list", "--format", "json"]);
+    assert!(output.status.success(), "list should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "[]", "JSON should show empty array");
 }
 
 #[test]

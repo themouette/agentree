@@ -4,12 +4,29 @@ use crate::utils::git::get_git_root;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use clap::Parser;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 pub struct ListArgs {
-    /// Output in JSON format
-    #[arg(long)]
+    /// Output format
+    #[arg(long, value_enum, default_value = "two-lines")]
+    pub format: OutputFormat,
+
+    /// Legacy: equivalent to --format=json (deprecated)
+    #[arg(long, conflicts_with = "format")]
     pub json: bool,
+}
+
+#[derive(clap::ValueEnum, Clone, Debug)]
+pub enum OutputFormat {
+    /// Two-line format: summary line + absolute path on second line (default)
+    TwoLines,
+    /// Compact table with relative paths (max-width: 120)
+    Table,
+    /// Card-style boxes with full absolute paths and details
+    Card,
+    /// Machine-readable JSON with absolute paths
+    Json,
 }
 
 #[derive(Serialize)]
@@ -19,6 +36,15 @@ struct WorktreeJson {
     backend: Option<String>,
     created: Option<String>,
     modified: Option<String>,
+}
+
+/// Internal representation of a worktree with its metadata for rendering
+struct WorktreeInfo {
+    branch: String,
+    path: PathBuf,
+    backend: String,
+    created: Option<String>,
+    modified: Option<std::time::SystemTime>,
 }
 
 pub fn execute(args: ListArgs) -> Result<()> {
@@ -35,6 +61,36 @@ pub fn execute(args: ListArgs) -> Result<()> {
     // Load config (for consistency and future use)
     let _config = config::load(&repo_root)?;
 
+    // Handle backward compatibility
+    let format = if args.json {
+        eprintln!("Warning: --json is deprecated, use --format=json instead");
+        OutputFormat::Json
+    } else {
+        args.format
+    };
+
+    // Get worktrees with metadata
+    let worktrees = get_worktrees_with_metadata()?;
+
+    // Check if there are any worktrees
+    if worktrees.is_empty() {
+        match format {
+            OutputFormat::Json => println!("[]"),
+            _ => println!("No worktrees found."),
+        }
+        return Ok(());
+    }
+
+    // Dispatch to format-specific renderer
+    match format {
+        OutputFormat::TwoLines => render_two_lines(&worktrees),
+        OutputFormat::Table => render_table(&worktrees, &repo_root),
+        OutputFormat::Card => render_card(&worktrees),
+        OutputFormat::Json => render_json(&worktrees),
+    }
+}
+
+fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
     // Get worktrees with auto-prune
     let worktrees = recovery::ensure_clean_state()?;
 
@@ -45,118 +101,173 @@ pub fn execute(args: ListArgs) -> Result<()> {
         .filter(|e| e.branch.is_some())
         .collect();
 
-    // Check if there are any worktrees
-    if worktree_list.is_empty() {
-        if !args.json {
-            println!("No worktrees found.");
-        } else {
-            println!("[]");
-        }
-        return Ok(());
-    }
-
     // Get last activity for each worktree and create sortable tuples
     let mut worktrees_with_time: Vec<_> = worktree_list
         .iter()
         .map(|entry| {
             let activity = operations::get_last_activity(&entry.path);
-            (*entry, activity)
+            let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
+
+            WorktreeInfo {
+                branch: entry.branch.clone().unwrap_or_default(),
+                path: entry.path.clone(),
+                backend: metadata
+                    .as_ref()
+                    .map(|m| m.backend.clone())
+                    .unwrap_or_else(|| "unknown".to_string()),
+                created: metadata.as_ref().map(|m| m.created_at.clone()),
+                modified: activity,
+            }
         })
         .collect();
 
     // Sort by last modified (most recent first)
-    worktrees_with_time.sort_by(|a, b| {
-        match (a.1, b.1) {
-            (Some(time_a), Some(time_b)) => time_b.cmp(&time_a), // Reverse order for most recent first
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
+    worktrees_with_time.sort_by(|a, b| match (a.modified, b.modified) {
+        (Some(time_a), Some(time_b)) => time_b.cmp(&time_a),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
     });
 
-    if args.json {
-        // JSON output
-        let json_output: Vec<WorktreeJson> = worktrees_with_time
-            .iter()
-            .map(|(entry, activity)| {
-                // Load metadata for each worktree
-                let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
+    Ok(worktrees_with_time)
+}
 
-                let modified = activity.map(|time| {
-                    use chrono::{DateTime, Utc};
-                    let datetime: DateTime<Utc> = time.into();
-                    datetime.to_rfc3339()
-                });
+fn format_created_date(created: Option<&String>) -> String {
+    created
+        .and_then(|c| {
+            use chrono::DateTime;
+            DateTime::parse_from_rfc3339(c)
+                .ok()
+                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
 
-                WorktreeJson {
-                    branch: entry.branch.clone().unwrap_or_default(),
-                    path: entry.path.display().to_string(),
-                    backend: metadata.as_ref().map(|m| m.backend.clone()),
-                    created: metadata.as_ref().map(|m| m.created_at.clone()),
-                    modified,
-                }
-            })
-            .collect();
+fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
+    let json_output: Vec<WorktreeJson> = worktrees
+        .iter()
+        .map(|info| {
+            let modified = info.modified.map(|time| {
+                use chrono::{DateTime, Utc};
+                let datetime: DateTime<Utc> = time.into();
+                datetime.to_rfc3339()
+            });
 
-        println!("{}", serde_json::to_string_pretty(&json_output)?);
-    } else {
-        // Table output
+            WorktreeJson {
+                branch: info.branch.clone(),
+                path: info.path.display().to_string(),
+                backend: Some(info.backend.clone()),
+                created: info.created.clone(),
+                modified,
+            }
+        })
+        .collect();
+
+    println!("{}", serde_json::to_string_pretty(&json_output)?);
+    Ok(())
+}
+
+fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
+    // Header
+    println!("{:<30} {:<12} {:<20}", "BRANCH", "BACKEND", "MODIFIED");
+
+    for info in worktrees {
+        let modified = info
+            .modified
+            .map(operations::format_activity)
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // First line: branch, backend, modified
         println!(
-            "{:<20} {:<40} {:<12} {:<16} {:<20}",
-            "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED"
+            "{:<30} {:<12} {:<20}",
+            truncate(&info.branch, 30),
+            truncate(&info.backend, 12),
+            modified
         );
 
-        for (entry, activity) in worktrees_with_time {
-            let branch = entry.branch.as_ref().unwrap();
-            let path = entry.path.display().to_string();
-
-            // Load metadata for backend and created info
-            let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
-            let backend = metadata
-                .as_ref()
-                .map(|m| m.backend.as_str())
-                .unwrap_or("unknown");
-
-            let created = metadata
-                .as_ref()
-                .and_then(|m| {
-                    // Parse ISO 8601 and format as YYYY-MM-DD HH:MM
-                    use chrono::DateTime;
-                    DateTime::parse_from_rfc3339(&m.created_at)
-                        .ok()
-                        .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
-                })
-                .unwrap_or_else(|| "-".to_string());
-
-            let modified = activity
-                .map(operations::format_activity)
-                .unwrap_or_else(|| "Unknown".to_string());
-
-            // Truncate long values
-            let branch_display = if branch.len() > 20 {
-                format!("{}...", &branch[..17])
-            } else {
-                branch.clone()
-            };
-
-            let path_display = if path.len() > 40 {
-                format!("{}...", &path[..37])
-            } else {
-                path
-            };
-
-            let backend_display = if backend.len() > 12 {
-                format!("{}...", &backend[..9])
-            } else {
-                backend.to_string()
-            };
-
-            println!(
-                "{:<20} {:<40} {:<12} {:<16} {:<20}",
-                branch_display, path_display, backend_display, created, modified
-            );
-        }
+        // Second line: absolute path with arrow
+        println!("  → {}", info.path.display());
     }
 
     Ok(())
+}
+
+fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
+    // Header with 120 max width
+    println!(
+        "{:<25} {:<50} {:<12} {:<18} {:<15}",
+        "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED"
+    );
+
+    for info in worktrees {
+        // Convert to relative path
+        let path_display = make_relative_path(&info.path, repo_root);
+
+        let created = format_created_date(info.created.as_ref());
+
+        let modified = info
+            .modified
+            .map(operations::format_activity)
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        println!(
+            "{:<25} {:<50} {:<12} {:<18} {:<15}",
+            truncate(&info.branch, 25),
+            truncate(&path_display, 50),
+            truncate(&info.backend, 12),
+            created,
+            modified
+        );
+    }
+
+    Ok(())
+}
+
+fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
+    for (i, info) in worktrees.iter().enumerate() {
+        if i > 0 {
+            println!(); // Blank line between cards
+        }
+
+        let created = format_created_date(info.created.as_ref());
+
+        let modified = info
+            .modified
+            .map(operations::format_activity)
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        println!("┌─ {}", info.branch);
+        println!("│  Path:     {}", info.path.display());
+        println!("│  Backend:  {}", info.backend);
+        println!("│  Created:  {}", created);
+        println!("│  Modified: {}", modified);
+        println!("└─");
+    }
+
+    Ok(())
+}
+
+fn make_relative_path(path: &Path, repo_root: &Path) -> String {
+    // Try relative to repo root first
+    if let Ok(rel) = path.strip_prefix(repo_root) {
+        return rel.display().to_string();
+    }
+
+    // Try relative to repo parent (for sibling directories like ../worktrees/)
+    if let Some(parent) = repo_root.parent() {
+        if let Ok(rel) = path.strip_prefix(parent) {
+            return format!("../{}", rel.display());
+        }
+    }
+
+    // Fallback to absolute path
+    path.display().to_string()
+}
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() > max_len {
+        format!("{}...", &s[..max_len.saturating_sub(3)])
+    } else {
+        s.to_string()
+    }
 }
