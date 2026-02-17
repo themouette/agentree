@@ -77,20 +77,16 @@ impl DockerSandboxBackend {
     /// Tries to extract from "agentree-{branch}" pattern.
     /// For other patterns, uses the whole directory name as a fallback.
     fn extract_branch_from_path(&self, path: &Path) -> String {
-        path.file_name()
+        let file_name = path
+            .file_name()
             .and_then(|n| n.to_str())
-            .and_then(|name| {
-                // Try "agentree-{branch}" pattern
-                name.strip_prefix("agentree-").map(|s| s.to_string())
-            })
-            .unwrap_or_else(|| {
-                // Fallback: use whole directory name
-                // This handles custom templates and non-standard naming
-                path.file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            })
+            .unwrap_or("unknown");
+
+        // Try to strip "agentree-" prefix, otherwise use the full name
+        file_name
+            .strip_prefix("agentree-")
+            .unwrap_or(file_name)
+            .to_string()
     }
 
     /// Check if a sandbox exists
