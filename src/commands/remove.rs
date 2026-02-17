@@ -15,9 +15,15 @@ pub struct RemoveArgs {
     #[arg(long, conflicts_with = "branches")]
     pub merged: Option<String>,
 
-    /// Force removal even with uncommitted changes
-    #[arg(short, long)]
-    pub force: bool,
+    /// Force removal (use -ff to remove locked worktrees)
+    /// -f: Remove worktree with uncommitted changes
+    /// -ff: Remove locked worktree
+    #[arg(short, long, action = clap::ArgAction::Count)]
+    pub force: u8,
+
+    /// Unlock worktree before removing (useful for interrupted/stuck worktrees)
+    #[arg(long)]
+    pub unlock: bool,
 }
 
 /// Cleanup backend resources for a workspace if applicable
@@ -84,7 +90,7 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
             if let Some(entry) = worktree_entry {
                 let workspace_path = entry.path.clone();
-                match operations::delete_worktree(&branch) {
+                match operations::delete_worktree(&branch, args.force, args.unlock) {
                     Ok(_) => {
                         removed_count += 1;
                         println!("Removed worktree for branch '{}'", branch);
@@ -125,7 +131,7 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
         let workspace_path = worktree_entry.map(|e| e.path.clone());
 
-        operations::delete_worktree(branch)?;
+        operations::delete_worktree(branch, args.force, args.unlock)?;
         println!("Removed worktree for branch '{}'", branch);
 
         // Cleanup backend resources if we found the workspace path

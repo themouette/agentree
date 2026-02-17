@@ -194,7 +194,12 @@ pub fn create_worktree(
 /// Delete a worktree by branch name
 ///
 /// This removes the worktree directory and updates git metadata, but preserves the branch.
-pub fn delete_worktree(branch: &str) -> Result<()> {
+///
+/// # Arguments
+/// * `branch` - Branch name to remove
+/// * `force_count` - Force level: 0=none, 1=dirty worktrees, 2=locked worktrees
+/// * `unlock` - If true, unlock the worktree before removing
+pub fn delete_worktree(branch: &str, force_count: u8, unlock: bool) -> Result<()> {
     // Validate branch name first
     validation::validate_branch_name(branch)?;
 
@@ -208,11 +213,62 @@ pub fn delete_worktree(branch: &str) -> Result<()> {
             branch: branch.to_string(),
         })?;
 
-    // Use git worktree remove to delete the directory and update metadata
     let path_str = crate::utils::git::path_to_str(&worktree.path, "worktree path")?;
-    run_git_command(&["worktree", "remove", path_str], "remove worktree")?;
 
-    Ok(())
+    // If unlock flag is set, try to unlock first
+    if unlock {
+        if let Err(e) = run_git_command(&["worktree", "unlock", path_str], "unlock worktree") {
+            // If unlock fails, provide a helpful message but continue with removal
+            eprintln!("Note: Could not unlock worktree: {}", e);
+            eprintln!("      Attempting removal anyway...");
+        }
+    }
+
+    // Build git command with appropriate force flags
+    let mut args = vec!["worktree", "remove"];
+
+    // Add force flags based on count
+    args.extend(std::iter::repeat_n("--force", force_count as usize));
+
+    args.push(path_str);
+
+    // Try to remove the worktree
+    match run_git_command(&args, "remove worktree") {
+        Ok(_) => Ok(()),
+        Err(e) => {
+            // Parse the error to provide helpful guidance
+            let error_msg = e.to_string();
+
+            if error_msg.contains("locked working tree") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove locked worktree for branch '{}'.\n\
+                    \n\
+                    The worktree is locked (likely due to interrupted initialization).\n\
+                    \n\
+                    To fix this, try one of these options:\n\
+                    1. Unlock and remove: agentree remove --unlock {}\n\
+                    2. Force remove: agentree remove -ff {}\n\
+                    3. Manual unlock: git worktree unlock <path> && agentree remove {}",
+                    branch, branch, branch, branch
+                )))
+            } else if error_msg.contains("uncommitted changes")
+                || error_msg.contains("modified files")
+            {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove worktree for branch '{}' with uncommitted changes.\n\
+                    \n\
+                    To fix this, try one of these options:\n\
+                    1. Force remove: agentree remove -f {}\n\
+                    2. Commit changes first: cd <worktree> && git commit\n\
+                    3. Stash changes: cd <worktree> && git stash",
+                    branch, branch
+                )))
+            } else {
+                // Return the original error if we can't provide specific guidance
+                Err(e)
+            }
+        }
+    }
 }
 
 /// List branches that have been merged into the base branch
