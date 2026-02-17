@@ -521,10 +521,7 @@ fn test_list_two_lines_format() {
     assert!(stdout.contains("MODIFIED"), "Should have MODIFIED header");
 
     // Verify branch is shown
-    assert!(
-        stdout.contains("two-lines-test"),
-        "Should show branch name"
-    );
+    assert!(stdout.contains("two-lines-test"), "Should show branch name");
 
     // Verify arrow for absolute path
     assert!(stdout.contains("→"), "Should show → for path line");
@@ -554,10 +551,7 @@ fn test_list_card_format() {
     assert!(stdout.contains("Backend:"), "Should have Backend label");
     assert!(stdout.contains("Created:"), "Should have Created label");
     assert!(stdout.contains("Modified:"), "Should have Modified label");
-    assert!(
-        stdout.contains("card-test"),
-        "Should show branch name"
-    );
+    assert!(stdout.contains("card-test"), "Should show branch name");
 }
 
 #[test]
@@ -592,7 +586,10 @@ fn test_list_json_format() {
     assert!(first.get("path").is_some(), "Should have path field");
     assert!(first.get("backend").is_some(), "Should have backend field");
     assert!(first.get("created").is_some(), "Should have created field");
-    assert!(first.get("modified").is_some(), "Should have modified field");
+    assert!(
+        first.get("modified").is_some(),
+        "Should have modified field"
+    );
 
     // Verify branch name
     let branch = first.get("branch").unwrap().as_str().unwrap();
@@ -691,11 +688,7 @@ fn test_list_empty_with_formats() {
     let output = test_repo.agentree(&["list", "--format", "json"]);
     assert!(output.status.success(), "list should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(
-        stdout.trim(),
-        "[]",
-        "JSON should show empty array"
-    );
+    assert_eq!(stdout.trim(), "[]", "JSON should show empty array");
 }
 
 #[test]
