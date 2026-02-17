@@ -1,4 +1,6 @@
+use crate::error::{AgentreeError, Result};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorktreeConfig {
@@ -25,6 +27,24 @@ impl Default for WorktreeConfig {
 }
 
 impl WorktreeConfig {
+    /// Resolve the worktree location directory
+    ///
+    /// Returns the configured location if set, otherwise defaults to ../worktrees
+    /// relative to the repository root.
+    pub fn resolve_location(&self, repo_root: &Path) -> Result<PathBuf> {
+        if let Some(location) = &self.location {
+            Ok(PathBuf::from(location))
+        } else {
+            // Default location: ../worktrees/
+            repo_root
+                .parent()
+                .ok_or_else(|| {
+                    AgentreeError::Worktree("Cannot determine parent directory".to_string())
+                })
+                .map(|p| p.join("worktrees"))
+        }
+    }
+
     /// Validate configuration and return warnings (not errors - config is still usable)
     /// Following NetworkIsolationConfig::validate() pattern
     pub fn validate(&self) -> Vec<String> {
@@ -134,5 +154,36 @@ mod tests {
 
         let warnings = config.validate();
         assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_location_default() {
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path().join("repo");
+        std::fs::create_dir(&repo_root).unwrap();
+
+        let config = WorktreeConfig::default();
+        let location = config.resolve_location(&repo_root).unwrap();
+
+        assert_eq!(location, temp_dir.path().join("worktrees"));
+    }
+
+    #[test]
+    fn test_resolve_location_custom() {
+        use tempfile::tempdir;
+
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path().join("repo");
+        let custom_location = temp_dir.path().join("custom");
+
+        let config = WorktreeConfig {
+            location: Some(custom_location.to_string_lossy().to_string()),
+            template: "{repo}/{branch}".to_string(),
+        };
+
+        let location = config.resolve_location(&repo_root).unwrap();
+        assert_eq!(location, custom_location);
     }
 }

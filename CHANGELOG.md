@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `doctor` command to check worktree health and fix issues:
+  - Detects orphaned directories (exist but not tracked by git)
+  - Detects broken metadata (git knows about but directory missing/corrupt)
+  - Interactive fix mode with `--fix` flag (prompts for each issue)
+  - Two output formats: human-readable (default) and JSON (`--format json`)
+  - Recursive scanning for nested worktree structures
+  - Exit codes for CI integration (returns error when issues found in human mode)
+  - Use case: Clean up leftover worktree directories and stale git metadata
 - `remove --merged` now defaults to current branch when no base branch is specified
   - Use `agentree rm --merged` to remove all worktrees merged into your current branch
   - Explicitly specify a base with `agentree rm --merged main` if needed

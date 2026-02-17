@@ -175,6 +175,11 @@ agentree ls                    # Alias
 agentree remove <branch>
 agentree rm feature-*          # Supports wildcards
 
+# Check worktree health and fix issues
+agentree doctor                # Scan for orphaned directories and broken metadata
+agentree doctor --fix          # Interactively fix detected issues
+agentree doctor --format json  # Machine-readable output
+
 # Open shell in workspace
 agentree shell <branch>
 agentree shell <branch> --base main    # Create from main if doesn't exist
