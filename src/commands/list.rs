@@ -38,6 +38,7 @@ struct WorktreeJson {
     modified: Option<String>,
 }
 
+/// Internal representation of a worktree with its metadata for rendering
 struct WorktreeInfo {
     branch: String,
     path: PathBuf,
