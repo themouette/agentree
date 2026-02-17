@@ -24,7 +24,8 @@ EXAMPLES:
     agentree claude feature              Start Claude in feature branch workspace
     agentree opencode hotfix main        Start OpenCode in hotfix branch (from main)
     agentree ls --json                   List worktrees in JSON format
-    agentree rm --merged main            Remove all merged worktrees
+    agentree rm --merged                 Remove worktrees merged into current branch
+    agentree rm --merged main            Remove worktrees merged into main
 ")]
 pub struct Cli {
     #[command(subcommand)]

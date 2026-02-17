@@ -150,9 +150,8 @@ agentree list
 # feature-auth   ../worktrees/myproject/feature   local    2024-01-15
 
 # 3. Done with work? Clean up merged branches
-agentree remove --merged main
-
-# Removes all branches that have been merged into main
+agentree remove --merged           # Removes branches merged into current branch
+agentree remove --merged main      # Or specify a base branch explicitly
 ```
 
 ### Common Commands
@@ -196,7 +195,7 @@ agentree exec <branch> -b hotfix -- npm test  # Create from hotfix
 agentree cd <branch>
 
 # Remove merged branches (cleanup)
-agentree remove --merged main
+agentree remove --merged       # Uses current branch
 ```
 
 ## Backends (Isolation Levels)
@@ -318,7 +317,7 @@ agentree claude feature-auth main
 # When done, clean up
 git checkout main
 git pull
-agentree remove --merged main  # Removes feature-auth if merged
+agentree remove --merged       # Removes feature-auth if merged into main
 ```
 
 ### Multiple Branches
