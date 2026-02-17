@@ -96,7 +96,6 @@ impl DockerSandboxBackend {
     }
 
     /// Check if a sandbox exists
-    #[allow(dead_code)]
     fn sandbox_exists(&self, workspace_path: &Path) -> Result<bool> {
         let name = self.sandbox_name(workspace_path);
         let output = run_captured(&self.binary, &["sandbox", "ls", "--format", "{{.Name}}"], workspace_path)?;
@@ -110,7 +109,6 @@ impl DockerSandboxBackend {
     }
 
     /// Remove a sandbox
-    #[allow(dead_code)]
     pub fn remove_sandbox(&self, workspace_path: &Path) -> Result<()> {
         let name = self.sandbox_name(workspace_path);
 
