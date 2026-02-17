@@ -31,6 +31,14 @@ impl TestRepo {
         self.git(&["config", "commit.gpgsign", "false"]);
         // Ensure we're on main branch for consistency
         self.git(&["checkout", "-b", "main"]);
+
+        // Create test-specific config to isolate from global config
+        // Always use 'local' backend in tests to avoid VM path validation
+        let config_path = self.repo_path.join(".agentree.toml");
+        fs::write(
+            &config_path,
+            "[backend]\ndefault = \"local\"\n"
+        ).expect("Failed to write test config");
     }
 
     /// Create a commit
