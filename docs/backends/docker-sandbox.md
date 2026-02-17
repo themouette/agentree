@@ -19,6 +19,7 @@ The `docker-sandbox` backend provides **microVM-based isolation** for running AI
 
 **Limitations:**
 - **Linux not supported** - microVM sandboxes require macOS/Windows
+- **Limited git worktree support** - main repo's `.git` directory cannot be mounted (Docker Sandboxes don't support custom volume mounts)
 - Requires Docker Desktop 4.58+ (Engine 29.1.5+)
 - Higher resource usage than `local` backend
 - Slower than `local` (but faster than full VMs)
@@ -95,21 +96,19 @@ network_policy = "restricted"
 # true = faster subsequent launches, uses more resources
 # false = clean slate each time, slower
 persistent = true
-
-# Mount main repo's .git directory for worktrees (default: true)
-# When true, git commands work properly in worktrees by mounting
-# the main repository's .git directory at the same path as on the host
-# Set to false for stricter isolation at the cost of git functionality
-mount_main_git = true
 ```
 
 ## How It Works
 
 ### Sandbox Lifecycle
 
-1. **First shell/agent call**: Sandbox is created with workspace mounted
-2. **Subsequent calls**: Reuses existing sandbox (fast)
-3. **Workspace removal**: Sandbox is automatically destroyed
+1. **First shell/agent call**: Sandbox is created using `docker sandbox create`
+2. **Shell access**: Uses `docker sandbox exec -it` to run bash in the existing sandbox
+3. **Agent execution**: Uses `docker sandbox run` in the existing sandbox
+4. **Subsequent calls**: Reuses existing sandbox (fast, ~1-2s)
+5. **Workspace removal**: Sandbox is automatically destroyed with `docker sandbox rm`
+
+Each workspace gets its own persistent sandbox, identified by a deterministic name based on the workspace path.
 
 ### Naming Convention
 
@@ -124,15 +123,42 @@ Examples:
 
 ### Workspace Mounting
 
-Your workspace is mounted at `/workspace` inside the sandbox:
+The workspace directory is automatically mounted at the **same absolute path** inside the sandbox:
 
 ```bash
 # On host
 /Users/me/worktrees/myproject/feature-auth
 
-# In sandbox
-/workspace
+# In sandbox (same path)
+/Users/me/worktrees/myproject/feature-auth
 ```
+
+This is automatic - Docker Sandboxes handle the mounting internally.
+
+### Git Worktree Limitations
+
+⚠️ **Important**: Docker Sandboxes do not support custom volume mounts (the `-v` flag used by regular `docker run`).
+
+**What this means for worktrees:**
+- The workspace itself is always mounted and accessible
+- **However**, the main repository's `.git` directory cannot be separately mounted
+- Some git operations may have limited functionality inside the sandbox
+
+**Example:**
+```bash
+# Main repo:          /Users/me/repos/myproject/.git
+# Worktree:           /Users/me/worktrees/myproject/feature-branch
+# Worktree .git file: points to main repo's .git
+
+# Inside sandbox: worktree files are accessible, but .git link may not resolve
+```
+
+**Workaround:**
+- Use `agentree exec` for git operations (runs on host, has full git access)
+- Or use the `claude-vm` backend which supports full git worktree mounting
+
+**Regular repos work fine:**
+If you're not using git worktrees (just a regular cloned repository), this limitation doesn't affect you.
 
 ## Supported Agents
 
@@ -168,10 +194,15 @@ Open an interactive shell in the sandbox:
 agentree shell feature-branch --backend docker-sandbox
 ```
 
+**How it works:**
+- If the sandbox doesn't exist yet, it's automatically created
+- Uses `docker sandbox exec -it` to run an interactive bash shell
+- The sandbox persists between shell and agent sessions
+
 Inside the sandbox:
-- Your workspace is at `/workspace`
+- Your workspace is at the same absolute path as on the host
 - You have full system access within the microVM
-- Changes to files in `/workspace` are synced to the host
+- Changes to files in the workspace are synced to the host
 
 ### Execute Commands
 
@@ -286,6 +317,7 @@ docker sandbox ls --format "{{.Name}}" | grep '^agentree-' | xargs -I {} docker 
 | **Resource Usage**       | Minimal      | Medium             | High           |
 | **Security**             | None         | Hypervisor-level   | Hypervisor-level |
 | **Docker-in-Docker**     | Host's Docker| ✅ Yes             | ✅ Yes         |
+| **Git Worktrees**        | ✅ Full      | ⚠️ Limited         | ✅ Full        |
 | **Agent Support**        | Any          | Any                | Any            |
 
 ### When to Choose docker-sandbox
@@ -413,6 +445,21 @@ No. Agentree manages the sandbox lifecycle:
 ### Can multiple workspaces share a sandbox?
 
 No. Each workspace gets its own isolated sandbox, ensuring no cross-contamination.
+
+### Why don't git worktrees work fully in docker-sandbox?
+
+Docker Sandboxes don't support custom volume mounts (`-v` flag). The workspace itself is mounted automatically, but we can't mount the main repo's `.git` directory separately.
+
+**Solution**: Use `agentree exec` for git operations (runs on host), or switch to `claude-vm` backend for full worktree support:
+
+```bash
+# Git operations on host (full access)
+agentree exec feature-branch -- git status
+agentree exec feature-branch -- git commit -m "message"
+
+# Or use claude-vm for full isolation + worktree support
+agentree create feature-branch --backend claude-vm
+```
 
 ## See Also
 

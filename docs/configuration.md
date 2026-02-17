@@ -281,14 +281,17 @@ persistent = true  # Faster launches, uses more resources
 
 #### `mount_main_git` (optional)
 
-Whether to mount the main repository's `.git` directory for worktrees. When enabled, git commands work properly inside the sandbox.
+⚠️ **Note**: This option has no effect on the `docker-sandbox` backend. Docker Sandboxes do not support custom volume mounts, so the main repo's `.git` directory cannot be mounted separately.
+
+Whether to mount the main repository's `.git` directory for worktrees. When enabled (on supported backends like `claude-vm`), git commands work properly inside the sandbox.
 
 **Type**: Boolean
 **Default**: `true`
+**Supported backends**: `claude-vm` only (not `docker-sandbox`)
 **Example**:
 ```toml
-[docker-sandbox]
-mount_main_git = true  # Enable git commands in worktrees
+[claude-vm]
+mount_main_git = true  # Enable git commands in worktrees (claude-vm only)
 # mount_main_git = false  # Stricter isolation, but git won't work
 ```
 
@@ -300,8 +303,11 @@ default = "docker-sandbox"
 [docker-sandbox]
 binary = "docker"
 persistent = true
-mount_main_git = true
 network_policy = "restricted"
+
+# For claude-vm backend:
+[claude-vm]
+mount_main_git = true  # Enables git worktree support
 ```
 
 ### `[agent]` Section

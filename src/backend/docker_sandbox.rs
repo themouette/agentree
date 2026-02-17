@@ -1,7 +1,6 @@
 use crate::backend::exec::{run_captured, run_host_command, run_interactive, ExecOutput};
 use crate::backend::Backend;
 use crate::error::{AgentreeError, Result};
-use crate::utils::git;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -20,6 +19,17 @@ use std::path::Path;
 /// - macOS: ✅ Supported (Docker Desktop 4.58+)
 /// - Windows: ✅ Supported (Docker Desktop 4.58+)
 /// - Linux: ❌ Not supported (microVMs require macOS/Windows)
+///
+/// # Worktree Limitations
+/// Docker Sandboxes do not support custom volume mounts (`-v` flag).
+/// The workspace is automatically mounted at the same absolute path,
+/// but the main repository's `.git` directory cannot be mounted separately.
+///
+/// This means git operations in worktrees may have limited functionality
+/// inside the sandbox. For full git worktree support, consider using
+/// the `claude-vm` backend instead.
+///
+/// The `mount_main_git` config option has no effect on this backend.
 #[derive(Debug, Clone)]
 pub struct DockerSandboxBackend {
     binary: String,
@@ -45,14 +55,6 @@ impl DockerSandboxBackend {
     pub fn with_config(mut self, config: crate::config::DockerSandboxConfig) -> Self {
         self.config = Some(config);
         self
-    }
-
-    /// Check if git mounting is enabled (default: true)
-    fn should_mount_git(&self) -> bool {
-        self.config
-            .as_ref()
-            .and_then(|c| c.mount_main_git)
-            .unwrap_or(true)
     }
 
     /// Generate a deterministic sandbox name from the workspace path
@@ -130,65 +132,6 @@ impl DockerSandboxBackend {
 
         Ok(())
     }
-
-    /// Get additional mount arguments for git worktrees
-    ///
-    /// If the workspace is a worktree and mount_main_git is enabled (default: true),
-    /// returns mount args for the main repo's .git directory so that git commands
-    /// work properly inside the sandbox.
-    fn get_git_mount_args(&self, workspace_path: &Path) -> Result<Vec<String>> {
-        let mut args = Vec::new();
-
-        // Check if git mounting is enabled
-        if !self.should_mount_git() {
-            return Ok(args);
-        }
-
-        // Save original directory and ensure it's restored in all code paths
-        let original_dir = std::env::current_dir()?;
-
-        // Change to workspace directory to run git commands
-        std::env::set_current_dir(workspace_path).map_err(|e| AgentreeError::BackendExecution {
-            backend: "docker-sandbox".to_string(),
-            error: format!("Failed to change to workspace directory: {}", e),
-        })?;
-
-        // Get git common directory, ensuring we restore original dir in all paths
-        let git_common_dir = match git::get_git_common_dir() {
-            Ok(dir) => {
-                // Restore directory before processing result
-                std::env::set_current_dir(&original_dir).map_err(|e| {
-                    AgentreeError::BackendExecution {
-                        backend: "docker-sandbox".to_string(),
-                        error: format!("Failed to restore original directory: {}", e),
-                    }
-                })?;
-                dir
-            }
-            Err(e) => {
-                // Restore directory even on error (ignore restoration errors to preserve original error)
-                let _ = std::env::set_current_dir(&original_dir);
-                return Err(e);
-            }
-        };
-
-        // If we have a git common dir and it's different from workspace/.git, mount it
-        if let Some(git_dir) = git_common_dir {
-            let workspace_git = workspace_path.join(".git");
-
-            // Only add mount if the git common dir is not inside the workspace
-            // (i.e., this is actually a worktree pointing to external .git)
-            if git_dir != workspace_git && !git_dir.starts_with(workspace_path) {
-                if let Some(git_dir_str) = git_dir.to_str() {
-                    // Mount the main repo's .git directory at the same path (read-only)
-                    args.push("-v".to_string());
-                    args.push(format!("{}:{}:ro", git_dir_str, git_dir_str));
-                }
-            }
-        }
-
-        Ok(args)
-    }
 }
 
 impl Default for DockerSandboxBackend {
@@ -207,17 +150,35 @@ impl Backend for DockerSandboxBackend {
                     error: format!("Invalid workspace path: {}", workspace_path.display()),
                 })?;
 
-        // Get git mount arguments if this is a worktree
-        let git_mounts = self.get_git_mount_args(workspace_path)?;
+        let sandbox_name = self.sandbox_name(workspace_path);
 
-        // Build command: docker sandbox run [git-mounts] bash workspace
-        let mut args = vec!["sandbox".to_string(), "run".to_string()];
-        args.extend(git_mounts);
-        args.push("bash".to_string());
-        args.push(workspace_str.to_string());
+        // Ensure sandbox exists (create if needed)
+        if !self.sandbox_exists(workspace_path)? {
+            // Create sandbox with a default agent (claude)
+            // This just creates the sandbox infrastructure, doesn't run the agent
+            let create_args = vec![
+                "sandbox",
+                "create",
+                "--name",
+                &sandbox_name,
+                "claude",
+                workspace_str,
+            ];
 
-        let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-        run_interactive(&self.binary, &args_refs, workspace_path)
+            let output = run_captured(&self.binary, &create_args, workspace_path)?;
+
+            if !output.success() {
+                return Err(AgentreeError::BackendExecution {
+                    backend: "docker-sandbox".to_string(),
+                    error: format!("Failed to create sandbox: {}", output.stderr.trim()),
+                });
+            }
+        }
+
+        // Execute interactive bash shell in the sandbox
+        let args = vec!["sandbox", "exec", "-it", &sandbox_name, "/bin/bash"];
+
+        run_interactive(&self.binary, &args, workspace_path)
     }
 
     fn exec(&self, workspace_path: &Path, command: &[String]) -> Result<ExecOutput> {
@@ -236,27 +197,40 @@ impl Backend for DockerSandboxBackend {
 
         match agent {
             Some(agent_name) => {
-                // Get git mount arguments if this is a worktree
-                let git_mounts = self.get_git_mount_args(workspace_path)?;
+                let sandbox_name = self.sandbox_name(workspace_path);
 
-                // Docker Sandbox syntax: docker sandbox run [OPTIONS] AGENT WORKSPACE [-- AGENT_ARGS...]
-                let mut args = vec!["sandbox".to_string(), "run".to_string()];
+                // Ensure sandbox exists (create if needed)
+                if !self.sandbox_exists(workspace_path)? {
+                    // Create sandbox with the specified agent
+                    let create_args = vec![
+                        "sandbox",
+                        "create",
+                        "--name",
+                        &sandbox_name,
+                        agent_name,
+                        workspace_str,
+                    ];
 
-                // Add git mounts for worktrees
-                args.extend(git_mounts);
+                    let output = run_captured(&self.binary, &create_args, workspace_path)?;
 
-                // Add agent and workspace
-                args.push(agent_name.to_string());
-                args.push(workspace_str.to_string());
+                    if !output.success() {
+                        return Err(AgentreeError::BackendExecution {
+                            backend: "docker-sandbox".to_string(),
+                            error: format!("Failed to create sandbox: {}", output.stderr.trim()),
+                        });
+                    }
+                }
+
+                // Run agent in the existing sandbox
+                let mut args = vec!["sandbox", "run", &sandbox_name];
 
                 // Add agent flags after -- separator if provided
                 if !flags.is_empty() {
-                    args.push("--".to_string());
-                    args.extend(flags.iter().cloned());
+                    args.push("--");
+                    args.extend(flags.iter().map(|s| s.as_str()));
                 }
 
-                let args_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                run_interactive(&self.binary, &args_refs, workspace_path)
+                run_interactive(&self.binary, &args, workspace_path)
             }
             None => {
                 // No agent specified - same error as LocalBackend
@@ -370,37 +344,5 @@ mod tests {
 
         let backend = DockerSandboxBackend::new().with_config(config.clone());
         assert_eq!(backend.config, Some(config));
-    }
-
-    #[test]
-    fn test_should_mount_git_default() {
-        let backend = DockerSandboxBackend::new();
-        assert!(backend.should_mount_git());
-    }
-
-    #[test]
-    fn test_should_mount_git_enabled() {
-        let config = crate::config::DockerSandboxConfig {
-            binary: None,
-            network_policy: None,
-            persistent: Some(true),
-            mount_main_git: Some(true),
-        };
-
-        let backend = DockerSandboxBackend::new().with_config(config);
-        assert!(backend.should_mount_git());
-    }
-
-    #[test]
-    fn test_should_mount_git_disabled() {
-        let config = crate::config::DockerSandboxConfig {
-            binary: None,
-            network_policy: None,
-            persistent: Some(true),
-            mount_main_git: Some(false),
-        };
-
-        let backend = DockerSandboxBackend::new().with_config(config);
-        assert!(!backend.should_mount_git());
     }
 }
