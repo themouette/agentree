@@ -13,7 +13,7 @@ pub struct RemoveArgs {
     pub branches: Vec<String>,
 
     /// Remove all branches merged into BASE (defaults to current branch if not specified)
-    #[arg(long, conflicts_with = "branches", num_args = 0..=1, default_missing_value = "HEAD")]
+    #[arg(long, conflicts_with = "branches", num_args(0..=1), default_missing_value = "HEAD")]
     pub merged: Option<String>,
 
     /// Force removal even with uncommitted changes or locked status
