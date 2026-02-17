@@ -66,6 +66,45 @@ echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zsh
 # - Tab completion: agentree agent my-branch --agent <TAB> shows available agents
 ```
 
+### Shell prompt customization (optional)
+
+When using `agentree shell`, environment variables are set that you can use to customize your prompt:
+
+<details>
+<summary><b>Bash/Zsh Example</b></summary>
+
+Add to your `~/.bashrc` or `~/.zshrc`:
+
+```bash
+# Show agentree workspace in prompt
+if [ -n "$AGENTREE_WORKSPACE" ]; then
+    PS1="(🌳 $AGENTREE_BRANCH) $PS1"
+fi
+```
+
+Result: `(🌳 feature-auth) user@host ~/workspace $`
+
+</details>
+
+<details>
+<summary><b>Starship Example</b></summary>
+
+Add to your `~/.config/starship.toml`:
+
+```toml
+[env_var.AGENTREE_BRANCH]
+symbol = "🌳 "
+format = "[$symbol$env_value]($style) "
+style = "cyan bold"
+```
+
+</details>
+
+**Available environment variables:**
+- `AGENTREE_WORKSPACE=1` - Indicates you're in an agentree workspace
+- `AGENTREE_BRANCH=<branch>` - The workspace branch name
+- `AGENTREE_WORKSPACE_PATH=<path>` - Full path to workspace
+
 </details>
 
 ## Quick Start
