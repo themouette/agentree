@@ -796,7 +796,9 @@ fn test_remove_merged_default_current_branch() {
         .current_dir(test_repo.path())
         .output()
         .expect("git symbolic-ref should work");
-    let branch = String::from_utf8_lossy(&current_branch.stdout).trim().to_string();
+    let branch = String::from_utf8_lossy(&current_branch.stdout)
+        .trim()
+        .to_string();
     assert_eq!(branch, "main", "Should be on main branch");
 
     // Run remove --merged without argument (should use current branch = main)
