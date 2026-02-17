@@ -46,8 +46,9 @@ OPTIONS:
     --global                   Install to /usr/local/bin (requires sudo)
                                Default is ~/.local/bin (no sudo required)
 
-    --shell-integration        Add 'eval "\$(agentree shell-init)"' to shell rc file
-                               Enables cd command to change directory
+    --shell-integration        Add shell integration (cd command + completion)
+                               Adds 'eval "\$(agentree shell-init --with-completion)"'
+                               to shell rc file
 
     --help                     Show this help message
 
@@ -149,9 +150,9 @@ add_shell_init() {
   if [ -z "$rc_file" ]; then
     log_warning "Could not detect shell RC file"
     echo ""
-    echo "To enable cd command integration, add this to your shell configuration:"
+    echo "To enable shell integration (cd command + completion), add this to your shell configuration:"
     echo ""
-    echo '  eval "$(agentree shell-init)"'
+    echo '  eval "$(agentree shell-init --with-completion)"'
     echo ""
     return 1
   fi
@@ -165,10 +166,10 @@ add_shell_init() {
   # Create RC file directory if it doesn't exist (for fish)
   mkdir -p "$(dirname "$rc_file")" 2>/dev/null
 
-  # Add initialization line
+  # Add initialization line with completion
   echo "" >> "$rc_file"
-  echo "# agentree shell integration" >> "$rc_file"
-  echo 'eval "$(agentree shell-init)"' >> "$rc_file"
+  echo "# agentree shell integration (cd command + tab completion)" >> "$rc_file"
+  echo 'eval "$(agentree shell-init --with-completion)"' >> "$rc_file"
 
   log_success "Shell integration added to $rc_file"
   return 0
@@ -282,9 +283,9 @@ install_agentree() {
   else
     log_info "Shell integration not installed (optional)"
     echo ""
-    echo "To enable cd command integration, add this to your shell configuration:"
+    echo "To enable shell integration (cd command + tab completion):"
     echo ""
-    echo '  eval "$(agentree shell-init)"'
+    echo '  eval "$(agentree shell-init --with-completion)"'
     echo ""
     echo "Or run the installer with --shell-integration:"
     echo "  curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh | bash -s -- --shell-integration"
