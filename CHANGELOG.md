@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `doctor` command to check worktree health and fix issues:
+  - Detects orphaned directories (exist but not tracked by git)
+  - Detects broken metadata (git knows about but directory missing/corrupt)
+  - Interactive fix mode with `--fix` flag (prompts for each issue)
+  - Two output formats: human-readable (default) and JSON (`--format json`)
+  - Recursive scanning for nested worktree structures
+  - Exit codes for CI integration (returns error when issues found in human mode)
+  - Use case: Clean up leftover worktree directories and stale git metadata
 - Docker Sandbox backend (`docker-sandbox`) for microVM-based isolation:
   - Hypervisor-level isolation using Docker Desktop's sandbox feature (Engine 29.1.5+)
   - Platform support: macOS and Windows (microVMs not available on Linux)

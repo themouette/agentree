@@ -1443,7 +1443,10 @@ fn test_doctor_clean_repo() {
 
     // Run doctor on clean repo
     let output = test_repo.agentree(&["doctor"]);
-    assert!(output.status.success(), "doctor should succeed on clean repo");
+    assert!(
+        output.status.success(),
+        "doctor should succeed on clean repo"
+    );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -1572,7 +1575,10 @@ fn test_doctor_json_output() {
     // Verify summary structure
     let summary = json.get("summary").unwrap();
     assert!(summary.get("total").is_some(), "Summary should have total");
-    assert!(summary.get("errors").is_some(), "Summary should have errors");
+    assert!(
+        summary.get("errors").is_some(),
+        "Summary should have errors"
+    );
     assert!(
         summary.get("warnings").is_some(),
         "Summary should have warnings"
@@ -1613,10 +1619,7 @@ fn test_doctor_json_with_issues() {
 
     // Verify issue structure
     let first_issue = &issues[0];
-    assert!(
-        first_issue.get("type").is_some(),
-        "Issue should have type"
-    );
+    assert!(first_issue.get("type").is_some(), "Issue should have type");
     assert!(first_issue.get("path").is_some(), "Issue should have path");
     assert!(
         first_issue.get("description").is_some(),

@@ -134,7 +134,11 @@ fn scan_for_orphaned(
     issues: &mut Vec<WorktreeIssue>,
 ) -> Result<()> {
     let entries = std::fs::read_dir(dir).map_err(|e| {
-        AgentreeError::Worktree(format!("Failed to read directory '{}': {}", dir.display(), e))
+        AgentreeError::Worktree(format!(
+            "Failed to read directory '{}': {}",
+            dir.display(),
+            e
+        ))
     })?;
 
     for entry in entries {
@@ -256,9 +260,9 @@ fn prompt_yes_no(prompt: &str) -> Result<bool> {
     let _ = io::stdout().flush();
 
     let mut input = String::new();
-    io::stdin().read_line(&mut input).map_err(|e| {
-        AgentreeError::Worktree(format!("Failed to read user input: {}", e))
-    })?;
+    io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| AgentreeError::Worktree(format!("Failed to read user input: {}", e)))?;
 
     let input = input.trim().to_lowercase();
     Ok(input == "y" || input == "yes")
