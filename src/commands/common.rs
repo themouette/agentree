@@ -157,12 +157,8 @@ impl WorkspaceContext {
         use crate::worktree::{metadata::WorktreeMetadata, operations};
 
         // Create or resume workspace
-        let result = operations::ensure_workspace(
-            &self.config.worktree,
-            &self.repo_root,
-            branch,
-            base,
-        )?;
+        let result =
+            operations::ensure_workspace(&self.config.worktree, &self.repo_root, branch, base)?;
 
         let was_created = matches!(result, operations::CreateResult::Created(_));
 
