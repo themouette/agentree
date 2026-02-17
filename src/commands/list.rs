@@ -63,6 +63,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
     // Handle backward compatibility
     let format = if args.json {
+        eprintln!("Warning: --json is deprecated, use --format=json instead");
         OutputFormat::Json
     } else {
         args.format
