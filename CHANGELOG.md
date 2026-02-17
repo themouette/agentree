@@ -35,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback agent resolution to hardcoded defaults (claude, opencode) when not configured
 - 7 new tests for agent resolution including fallback behavior
 - 4 new tests for claude-vm backend argument building
+- Welcome banner when entering a workspace shell showing:
+  - Workspace name (branch)
+  - Full path to workspace
+  - Backend being used
+  - Exit instructions (exit or Ctrl+D)
+  - Uses colors when running in a TTY, plain text fallback for pipes/redirects
+- Environment variables for shell prompt customization:
+  - `AGENTREE_WORKSPACE=1` - Indicates you're in an agentree workspace
+  - `AGENTREE_BRANCH=<branch>` - The workspace branch name
+  - `AGENTREE_WORKSPACE_PATH=<path>` - Full path to workspace
+  - Enables users to customize their shell prompt to show workspace context
 
 ### Changed
 
