@@ -69,7 +69,7 @@ source "$FUNCTIONS_FILE" || {
 # Add shell integration
 add_shell_init "$MOCK_RC" >/dev/null 2>&1
 
-if grep -q 'eval "$(agentree shell-init)"' "$MOCK_RC"; then
+if grep -q 'eval "$(agentree shell-init' "$MOCK_RC"; then
     pass "RC file contains initialization line"
 else
     run_test fail "RC file missing initialization line"

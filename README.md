@@ -27,20 +27,33 @@ main repo          ┌─> feature-auth (isolated)
 
 ## Installation
 
-**One-line install** (macOS/Linux):
+### Quick Install (Recommended)
+
+**Install with shell integration** (cd command + tab completion):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh | bash -s -- --shell-integration
+```
+
+This will:
+- Install `agentree` to `~/.local/bin`
+- Add shell integration (cd command + tab completion) to your shell rc file
+- Enable features like `agentree cd <branch>` and smart tab completion
+
+**Basic install** (no shell integration):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh | bash
 ```
 
+Then add shell integration manually:
+```bash
+echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zshrc
+source ~/.bashrc  # or source ~/.zshrc
+```
+
 <details>
 <summary>Other installation methods</summary>
-
-### Homebrew (macOS)
-
-```bash
-brew install themouette/tap/agentree
-```
 
 ### From source
 
@@ -48,22 +61,32 @@ brew install themouette/tap/agentree
 git clone https://github.com/themouette/agentree
 cd agentree
 cargo install --path .
+
+# Add shell integration
+echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc
+source ~/.bashrc
 ```
 
-### Shell integration & completion (optional but recommended)
+### What Shell Integration Provides
+
+Once shell integration is enabled, you get:
+
+- **cd command**: `agentree cd <branch>` changes directory to workspace
+- **Tab completion for branches**: `agentree create new --base <TAB>` shows your git branches
+- **Tab completion for agents**: `agentree agent my-branch --agent <TAB>` shows available agents
+- **Tab completion for backends**: `agentree create feature --backend <TAB>` shows backends
+
+### Advanced: Separate cd and completion
 
 ```bash
-# One-liner: enables cd command + tab completion
-echo 'eval "$(agentree shell-init --with-completion)"' >> ~/.bashrc  # or ~/.zshrc
+# Just cd command (no completion)
+eval "$(agentree shell-init)"
 
-# Or separately:
-# Just cd command: eval "$(agentree shell-init)"
-# Just completion: eval "$(agentree completion bash)"
+# Just completion (no cd command)
+eval "$(agentree completion bash)"  # or zsh, fish
 
-# After sourcing, you get:
-# - cd command: agentree cd <branch> changes directory
-# - Tab completion: agentree create new --base <TAB> shows your git branches
-# - Tab completion: agentree agent my-branch --agent <TAB> shows available agents
+# Both together (recommended)
+eval "$(agentree shell-init --with-completion)"
 ```
 
 ### Shell prompt customization (optional)
