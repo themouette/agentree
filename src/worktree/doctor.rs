@@ -101,18 +101,8 @@ fn find_orphaned_directories(
 ) -> Result<Vec<WorktreeIssue>> {
     let mut issues = Vec::new();
 
-    // Determine scan location
-    let scan_dir = if let Some(location) = &config.location {
-        PathBuf::from(location)
-    } else {
-        // Default location: ../worktrees/
-        repo_root
-            .parent()
-            .ok_or_else(|| {
-                AgentreeError::Worktree("Cannot determine parent directory".to_string())
-            })?
-            .join("worktrees")
-    };
+    // Determine scan location using config method
+    let scan_dir = config.resolve_location(repo_root)?;
 
     // If scan directory doesn't exist, no orphaned directories to find
     if !scan_dir.exists() {
