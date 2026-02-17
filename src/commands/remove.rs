@@ -2,6 +2,7 @@ use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
+use crate::worktree::operations::ForceLevel;
 use crate::worktree::{operations, recovery, validation};
 use clap::Parser;
 
@@ -15,13 +16,21 @@ pub struct RemoveArgs {
     #[arg(long, conflicts_with = "branches")]
     pub merged: Option<String>,
 
-    /// Force removal (use -ff to remove locked worktrees)
-    /// -f: Remove worktree with uncommitted changes
-    /// -ff: Remove locked worktree
+    /// Force removal even with uncommitted changes or locked status
+    ///
+    /// Use -f to remove worktrees with uncommitted changes.
+    /// Use -ff to forcibly remove locked worktrees.
+    ///
+    /// Locked worktrees typically occur from interrupted operations.
+    /// Prefer --unlock over -ff when possible, as -ff bypasses safety checks.
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub force: u8,
 
-    /// Unlock worktree before removing (useful for interrupted/stuck worktrees)
+    /// Unlock the worktree before attempting normal removal
+    ///
+    /// Use this for stuck/locked worktrees from interrupted operations.
+    /// This attempts to unlock, then removes with normal safety checks.
+    /// Safer than -ff, which forces removal and bypasses all checks.
     #[arg(long)]
     pub unlock: bool,
 }
@@ -90,7 +99,8 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
             if let Some(entry) = worktree_entry {
                 let workspace_path = entry.path.clone();
-                match operations::delete_worktree(&branch, args.force, args.unlock) {
+                let force_level = ForceLevel::from_count(args.force);
+                match operations::delete_worktree(&branch, force_level, args.unlock) {
                     Ok(_) => {
                         removed_count += 1;
                         println!("Removed worktree for branch '{}'", branch);
@@ -131,7 +141,8 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
         let workspace_path = worktree_entry.map(|e| e.path.clone());
 
-        operations::delete_worktree(branch, args.force, args.unlock)?;
+        let force_level = ForceLevel::from_count(args.force);
+        operations::delete_worktree(branch, force_level, args.unlock)?;
         println!("Removed worktree for branch '{}'", branch);
 
         // Cleanup backend resources if we found the workspace path
