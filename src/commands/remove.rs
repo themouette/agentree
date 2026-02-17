@@ -33,12 +33,13 @@ fn cleanup_backend_resources(
     match backend_kind {
         BackendKind::DockerSandbox => {
             // Create docker-sandbox backend and attempt cleanup
-            let backend = if let Some(docker_config) = config.docker_sandbox.binary.as_ref() {
-                DockerSandboxBackend::with_binary(docker_config.clone())
-                    .with_config(config.docker_sandbox.clone())
-            } else {
-                DockerSandboxBackend::new().with_config(config.docker_sandbox.clone())
-            };
+            let mut backend = DockerSandboxBackend::new();
+
+            if let Some(docker_binary) = config.docker_sandbox.binary.as_ref() {
+                backend = backend.with_binary(docker_binary.clone());
+            }
+
+            let backend = backend.with_config(config.docker_sandbox.clone());
 
             if let Err(e) = backend.remove_sandbox(workspace_path) {
                 // Log but don't fail - sandbox may already be removed or not exist

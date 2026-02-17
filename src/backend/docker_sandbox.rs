@@ -35,12 +35,10 @@ impl DockerSandboxBackend {
         }
     }
 
-    /// Create a new DockerSandboxBackend with a custom binary path
-    pub fn with_binary(binary: String) -> Self {
-        Self {
-            binary,
-            config: None,
-        }
+    /// Set a custom binary path (builder pattern)
+    pub fn with_binary(mut self, binary: String) -> Self {
+        self.binary = binary;
+        self
     }
 
     /// Set the configuration for this backend
@@ -284,7 +282,8 @@ mod tests {
 
     #[test]
     fn test_with_binary_stores_custom_binary() {
-        let backend = DockerSandboxBackend::with_binary("/custom/docker".to_string());
+        let backend = DockerSandboxBackend::new()
+            .with_binary("/custom/docker".to_string());
         assert_eq!(backend.binary, "/custom/docker");
     }
 
