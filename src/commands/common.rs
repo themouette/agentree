@@ -96,6 +96,7 @@ impl WorkspaceContext {
         worktree_location: Option<&str>,
         agent: Option<&str>,
     ) -> Result<Self> {
+        use crate::backend::BackendRegistry;
         use crate::utils::git::get_git_root;
         use crate::worktree::validation;
 
@@ -120,6 +121,11 @@ impl WorkspaceContext {
             agent,
             None, // editor not used by commands that use WorkspaceContext
         )?;
+
+        // Validate the effective backend before proceeding
+        let backend_kind = config.effective_backend();
+        let registry = BackendRegistry::new();
+        registry.validate(&backend_kind)?;
 
         Ok(Self { repo_root, config })
     }
