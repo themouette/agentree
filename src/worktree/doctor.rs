@@ -136,26 +136,19 @@ fn scan_for_orphaned(
         return Ok(());
     }
 
-    let entries = std::fs::read_dir(dir).map_err(|e| {
-        AgentreeError::Worktree(format!(
-            "Failed to read directory '{}': {}",
-            dir.display(),
-            e
-        ))
-    })?;
+    let entries = std::fs::read_dir(dir)
+        .map_err(|e| {
+            AgentreeError::Worktree(format!(
+                "Failed to read directory '{}': {}",
+                dir.display(),
+                e
+            ))
+        })?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir());
 
-    for entry in entries {
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue, // Skip entries we can't read
-        };
-
-        let path = entry.path();
-
-        // Skip non-directories
-        if !path.is_dir() {
-            continue;
-        }
+    for path in entries {
 
         // Check if this directory has a .git file/directory (looks like a worktree)
         let git_path = path.join(".git");
