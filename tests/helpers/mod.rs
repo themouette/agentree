@@ -34,9 +34,9 @@ impl TestRepo {
 
         // Create test-specific config to isolate from global config
         // Always use 'local' backend in tests to avoid VM path validation
-        // Use test-specific worktrees directory to avoid cross-test interference
+        // Use test-specific worktrees directory INSIDE the temp dir to avoid cross-test interference
         let config_path = self.repo_path.join(".agentree.toml");
-        let worktrees_path = self.repo_path.parent().unwrap().join("worktrees");
+        let worktrees_path = self.temp_dir.path().join("worktrees");
         let config_content = format!(
             "[backend]\ndefault = \"local\"\n\n[worktree]\nlocation = \"{}\"\n",
             worktrees_path.display()
@@ -109,6 +109,6 @@ impl TestRepo {
 
     /// Get the expected worktrees directory path
     pub fn worktrees_dir(&self) -> PathBuf {
-        self.repo_path.parent().unwrap().join("worktrees")
+        self.temp_dir.path().join("worktrees")
     }
 }
