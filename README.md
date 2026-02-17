@@ -198,23 +198,35 @@ agentree remove --merged main
 
 Choose your isolation strategy:
 
-| Backend          | Isolation          | Use Case                              | Setup                                                        |
-| ---------------- | ------------------ | ------------------------------------- | ------------------------------------------------------------ |
-| `local`          | None               | Trusted code, fast iteration          | ✅ Built-in (default)                                        |
-| `claude-vm`      | Lima VM            | Untrusted code, full system isolation | Install [claude-vm](https://github.com/themouette/claude-vm) |
-| `docker sandbox` | Use Docker sandbox | Coming soon                           | -                                                            |
+| Backend          | Isolation            | Use Case                               | Setup                                                         | Platform    |
+| ---------------- | -------------------- | -------------------------------------- | ------------------------------------------------------------- | ----------- |
+| `local`          | None                 | Trusted code, fast iteration           | ✅ Built-in (default)                                         | All         |
+| `claude-vm`      | Lima VM              | Untrusted code, full system isolation  | Install [claude-vm](https://github.com/themouette/claude-vm)  | All         |
+| `docker-sandbox` | MicroVM (Docker)     | AI agents on untrusted code, fast boot | Install [Docker Desktop 4.58+](https://www.docker.com/docker) | macOS/Win   |
 
 **Set backend per workspace:**
 
 ```bash
+# Use Docker Sandbox for microVM isolation
+agentree create feature --backend docker-sandbox
+
+# Use claude-vm for full VM isolation
 agentree create feature --backend claude-vm
+
+# Use local for no isolation (default)
+agentree create feature --backend local
 ```
 
 **Or configure default** in `.agentree.toml`:
 
 ```toml
 [backend]
-default = "claude-vm"
+default = "docker-sandbox"  # or "claude-vm", "local"
+
+[docker-sandbox]
+binary = "docker"        # Custom docker binary path
+persistent = true        # Keep sandboxes running (faster subsequent launches)
+mount_main_git = true    # Mount main repo's .git for worktrees (enables git commands)
 ```
 
 ## Agents (AI Tools)
@@ -255,7 +267,7 @@ location = "../worktrees"
 template = "{repo}/{branch}"
 
 [backend]
-default = "local"  # or "claude-vm"
+default = "local"  # or "claude-vm", "docker-sandbox"
 
 [agent]
 default = "claude"
