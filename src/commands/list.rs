@@ -254,24 +254,20 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
 }
 
 fn make_relative_path(path: &Path, repo_root: &Path) -> String {
-    path.strip_prefix(repo_root)
-        .ok()
-        .map(|p| {
-            // If it's in a sibling directory, show as ../dirname/...
-            if let Ok(p) = p.strip_prefix("..") {
-                format!("../{}", p.display())
-            } else {
-                p.display().to_string()
-            }
-        })
-        .unwrap_or_else(|| {
-            // Fallback: try to make it relative to parent
-            repo_root
-                .parent()
-                .and_then(|parent| path.strip_prefix(parent).ok())
-                .map(|p| format!("../{}", p.display()))
-                .unwrap_or_else(|| path.display().to_string())
-        })
+    // Try relative to repo root first
+    if let Ok(rel) = path.strip_prefix(repo_root) {
+        return rel.display().to_string();
+    }
+
+    // Try relative to repo parent (for sibling directories like ../worktrees/)
+    if let Some(parent) = repo_root.parent() {
+        if let Ok(rel) = path.strip_prefix(parent) {
+            return format!("../{}", rel.display());
+        }
+    }
+
+    // Fallback to absolute path
+    path.display().to_string()
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
