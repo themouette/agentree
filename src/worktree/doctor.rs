@@ -7,6 +7,10 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+/// Maximum recursion depth when scanning for orphaned directories
+/// This prevents unbounded recursion and handles symlink cycles
+const MAX_SCAN_DEPTH: usize = 10;
+
 /// Types of worktree issues that can be detected
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -122,7 +126,7 @@ fn find_orphaned_directories(
         .collect();
 
     // Recursively scan for worktree directories
-    scan_for_orphaned(&scan_dir, &tracked_paths, &mut issues)?;
+    scan_for_orphaned(&scan_dir, &tracked_paths, &mut issues, 0)?;
 
     Ok(issues)
 }
@@ -132,7 +136,13 @@ fn scan_for_orphaned(
     dir: &Path,
     tracked_paths: &[PathBuf],
     issues: &mut Vec<WorktreeIssue>,
+    depth: usize,
 ) -> Result<()> {
+    // Prevent unbounded recursion
+    if depth >= MAX_SCAN_DEPTH {
+        return Ok(());
+    }
+
     let entries = std::fs::read_dir(dir).map_err(|e| {
         AgentreeError::Worktree(format!(
             "Failed to read directory '{}': {}",
@@ -181,7 +191,7 @@ fn scan_for_orphaned(
         } else {
             // No .git file, but might contain subdirectories with worktrees
             // Recurse into this directory
-            let _ = scan_for_orphaned(&path, tracked_paths, issues);
+            let _ = scan_for_orphaned(&path, tracked_paths, issues, depth + 1);
         }
     }
 
