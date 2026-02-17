@@ -149,7 +149,6 @@ fn scan_for_orphaned(
         .filter(|p| p.is_dir());
 
     for path in entries {
-
         // Check if this directory has a .git file/directory (looks like a worktree)
         let git_path = path.join(".git");
         if git_path.exists() {
