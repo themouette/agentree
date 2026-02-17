@@ -87,9 +87,10 @@ pub fn try_repair() -> Result<()> {
     Ok(())
 }
 
-/// Ensure clean state by running auto-prune and querying worktrees
+/// Ensure clean state by running repair, auto-prune, and querying worktrees
 /// This is the main entry point Phase 2 will call before operations
 pub fn ensure_clean_state() -> Result<Vec<WorktreeEntry>> {
+    try_repair()?;
     auto_prune()?;
     list_worktrees()
 }
