@@ -83,7 +83,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
     // Dispatch to format-specific renderer
     match format {
-        OutputFormat::TwoLines => render_two_lines(&worktrees, &repo_root),
+        OutputFormat::TwoLines => render_two_lines(&worktrees),
         OutputFormat::Table => render_table(&worktrees, &repo_root),
         OutputFormat::Card => render_card(&worktrees),
         OutputFormat::Json => render_json(&worktrees),
@@ -167,7 +167,7 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
     Ok(())
 }
 
-fn render_two_lines(worktrees: &[WorktreeInfo], _repo_root: &Path) -> Result<()> {
+fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
     // Header
     println!("{:<30} {:<12} {:<20}", "BRANCH", "BACKEND", "MODIFIED");
 
