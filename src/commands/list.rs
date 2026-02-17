@@ -20,13 +20,13 @@ pub struct ListArgs {
 #[derive(clap::ValueEnum, Clone, Debug)]
 #[allow(clippy::enum_variant_names)]
 pub enum OutputFormat {
-    /// Two-line format with indented paths (default)
+    /// Two-line format: summary line + absolute path on second line (default)
     TwoLines,
-    /// Traditional table format with relative paths (max-width: 120)
+    /// Compact table with relative paths (max-width: 120)
     Table,
-    /// Card-style with boxes and full details
+    /// Card-style boxes with full absolute paths and details
     Card,
-    /// Machine-readable JSON
+    /// Machine-readable JSON with absolute paths
     Json,
 }
 
