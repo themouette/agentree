@@ -12,16 +12,16 @@ pub struct DoctorArgs {
     #[arg(long)]
     pub fix: bool,
 
-    /// Output format
+    /// Output format (json mode always exits with success for machine parsing)
     #[arg(long, value_enum, default_value = "human")]
     pub format: OutputFormat,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum OutputFormat {
-    /// Human-readable format with colored output
+    /// Human-readable format (exits with error if issues found)
     Human,
-    /// Machine-readable JSON format
+    /// Machine-readable JSON format (always exits successfully)
     Json,
 }
 
