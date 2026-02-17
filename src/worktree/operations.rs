@@ -56,6 +56,113 @@ impl CreateResult {
     }
 }
 
+/// Force level for worktree removal operations
+///
+/// Controls how aggressively to remove a worktree:
+/// - `None`: Normal removal (fails on dirty or locked worktrees)
+/// - `IgnoreDirty`: Remove even with uncommitted changes (git worktree remove --force)
+/// - `IgnoreLocked`: Remove even if locked (git worktree remove --force --force)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForceLevel {
+    /// No forcing - normal removal behavior
+    None,
+    /// Ignore uncommitted changes (equivalent to -f or one --force flag)
+    IgnoreDirty,
+    /// Ignore locked status (equivalent to -ff or two --force flags)
+    IgnoreLocked,
+}
+
+impl ForceLevel {
+    /// Get the number of --force flags to pass to git worktree remove
+    pub fn flag_count(&self) -> usize {
+        match self {
+            Self::None => 0,
+            Self::IgnoreDirty => 1,
+            Self::IgnoreLocked => 2,
+        }
+    }
+
+    /// Create ForceLevel from a count (e.g., from clap's Count action)
+    /// 0 => None, 1 => IgnoreDirty, 2+ => IgnoreLocked
+    pub fn from_count(count: u8) -> Self {
+        match count {
+            0 => Self::None,
+            1 => Self::IgnoreDirty,
+            _ => Self::IgnoreLocked,
+        }
+    }
+}
+
+/// Remove an orphaned worktree directory if it exists
+///
+/// An orphaned directory is one that exists on disk but is not tracked by git
+/// (e.g., after `git worktree prune` removed the metadata but left the directory).
+///
+/// At this point in the code flow:
+/// - We've already run `git worktree repair` in `ensure_clean_state()`
+/// - We've already listed all worktrees that git knows about
+/// - The directory exists but is NOT in the worktree list
+/// - Therefore: the directory is truly orphaned (no git metadata exists for it)
+///
+/// This function prompts the user and removes the orphaned directory to allow
+/// worktree creation to proceed.
+fn remove_orphaned_directory(path: &Path) -> Result<()> {
+    use std::io::{self, Write};
+
+    if !path.exists() {
+        // Directory doesn't exist, nothing to do
+        return Ok(());
+    }
+
+    // At this point, we know:
+    // 1. Directory exists on disk
+    // 2. Git doesn't know about it (we're in create_worktree, not InWorktree case)
+    // 3. Repair was already attempted in ensure_clean_state()
+    // Therefore: directory is truly orphaned with no git metadata
+
+    eprintln!(
+        "Warning: Directory '{}' exists but is not tracked by git.",
+        path.display()
+    );
+    eprintln!("Directory appears to be orphaned (no git metadata found).");
+    eprintln!("This may be from a previously pruned worktree.");
+    eprintln!();
+    eprintln!("Note: Automatic repair was already attempted during initialization.");
+    eprintln!();
+
+    // Prompt for confirmation
+    print!("Remove directory and continue? [y/N] ");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    if let Err(e) = io::stdin().read_line(&mut input) {
+        return Err(AgentreeError::Worktree(format!(
+            "Failed to read user input: {}",
+            e
+        )));
+    }
+    let input = input.trim().to_lowercase();
+
+    if input != "y" && input != "yes" {
+        return Err(AgentreeError::Worktree(format!(
+            "Directory '{}' already exists. Please remove it manually or use a different location.",
+            path.display()
+        )));
+    }
+
+    // User confirmed, remove the directory
+    std::fs::remove_dir_all(path).map_err(|e| {
+        AgentreeError::Worktree(format!(
+            "Failed to remove orphaned directory '{}': {}",
+            path.display(),
+            e
+        ))
+    })?;
+
+    eprintln!("Removed orphaned directory.");
+    Ok(())
+}
+
 /// Detect the status of a branch
 ///
 /// Returns:
@@ -163,6 +270,9 @@ pub fn create_worktree(
             let context = TemplateContext::new(repo_name, branch, &short_hash);
             let worktree_path = compute_worktree_path(config, repo_root, &context)?;
 
+            // Clean up orphaned directory if it exists (from previous pruned worktree)
+            remove_orphaned_directory(&worktree_path)?;
+
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
             run_git_command(&["worktree", "add", path_str, branch], "create worktree")?;
 
@@ -177,6 +287,9 @@ pub fn create_worktree(
                 .unwrap_or("repo");
             let context = TemplateContext::new(repo_name, branch, &short_hash);
             let worktree_path = compute_worktree_path(config, repo_root, &context)?;
+
+            // Clean up orphaned directory if it exists (from previous pruned worktree)
+            remove_orphaned_directory(&worktree_path)?;
 
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
             let mut args = vec!["worktree", "add", "-b", branch, path_str];
@@ -197,9 +310,9 @@ pub fn create_worktree(
 ///
 /// # Arguments
 /// * `branch` - Branch name to remove
-/// * `force_count` - Force level: 0=none, 1=dirty worktrees, 2=locked worktrees
-/// * `unlock` - If true, unlock the worktree before removing
-pub fn delete_worktree(branch: &str, force_count: u8, unlock: bool) -> Result<()> {
+/// * `force_level` - How aggressively to remove (None/IgnoreDirty/IgnoreLocked)
+/// * `unlock` - If true, attempt to unlock the worktree before removing
+pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> Result<()> {
     // Validate branch name first
     validation::validate_branch_name(branch)?;
 
@@ -217,18 +330,29 @@ pub fn delete_worktree(branch: &str, force_count: u8, unlock: bool) -> Result<()
 
     // If unlock flag is set, try to unlock first
     if unlock {
-        if let Err(e) = run_git_command(&["worktree", "unlock", path_str], "unlock worktree") {
-            // If unlock fails, provide a helpful message but continue with removal
-            eprintln!("Note: Could not unlock worktree: {}", e);
-            eprintln!("      Attempting removal anyway...");
+        match run_git_command(&["worktree", "unlock", path_str], "unlock worktree") {
+            Ok(_) => {
+                eprintln!("Unlocked worktree for branch '{}'", branch);
+            }
+            Err(e) => {
+                let error_msg = e.to_string();
+                // "not locked" or "unlocked" in error message means it's already unlocked
+                if !error_msg.contains("not locked") && !error_msg.contains("unlocked") {
+                    eprintln!("Warning: Could not unlock worktree: {}", e);
+                    eprintln!("         Attempting removal anyway...");
+                }
+                // If it's already unlocked, that's fine - continue silently
+            }
         }
     }
 
     // Build git command with appropriate force flags
     let mut args = vec!["worktree", "remove"];
 
-    // Add force flags based on count
-    args.extend(std::iter::repeat_n("--force", force_count as usize));
+    // Add force flags based on level (compatible with older Rust versions)
+    // Note: Using repeat().take() instead of repeat_n() for broader Rust version compatibility
+    #[allow(clippy::manual_repeat_n)]
+    args.extend(std::iter::repeat("--force").take(force_level.flag_count()));
 
     args.push(path_str);
 
@@ -241,27 +365,34 @@ pub fn delete_worktree(branch: &str, force_count: u8, unlock: bool) -> Result<()
 
             if error_msg.contains("locked working tree") {
                 Err(AgentreeError::Worktree(format!(
-                    "Cannot remove locked worktree for branch '{}'.\n\
-                    \n\
-                    The worktree is locked (likely due to interrupted initialization).\n\
-                    \n\
-                    To fix this, try one of these options:\n\
-                    1. Unlock and remove: agentree remove --unlock {}\n\
-                    2. Force remove: agentree remove -ff {}\n\
-                    3. Manual unlock: git worktree unlock <path> && agentree remove {}",
-                    branch, branch, branch, branch
+                    r#"Cannot remove locked worktree for branch '{branch}'.
+
+The worktree is locked (likely due to interrupted initialization).
+Location: {path}
+
+To fix this, try one of these options:
+1. Unlock and remove: agentree remove --unlock {branch}
+2. Force remove: agentree remove -ff {branch}
+3. Manual unlock: git worktree unlock "{path}" && agentree remove {branch}"#,
+                    branch = branch,
+                    path = path_str
                 )))
             } else if error_msg.contains("uncommitted changes")
                 || error_msg.contains("modified files")
+                || error_msg.contains("untracked files")
+                || error_msg.contains("modified or untracked")
             {
                 Err(AgentreeError::Worktree(format!(
-                    "Cannot remove worktree for branch '{}' with uncommitted changes.\n\
-                    \n\
-                    To fix this, try one of these options:\n\
-                    1. Force remove: agentree remove -f {}\n\
-                    2. Commit changes first: cd <worktree> && git commit\n\
-                    3. Stash changes: cd <worktree> && git stash",
-                    branch, branch
+                    r#"Cannot remove worktree for branch '{branch}' with uncommitted changes.
+
+Location: {path}
+
+To fix this, try one of these options:
+1. Force remove: agentree remove -f {branch}
+2. Commit changes first: cd "{path}" && git commit
+3. Stash changes: cd "{path}" && git stash"#,
+                    branch = branch,
+                    path = path_str
                 )))
             } else {
                 // Return the original error if we can't provide specific guidance

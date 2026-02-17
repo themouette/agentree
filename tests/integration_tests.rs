@@ -1164,3 +1164,265 @@ fn test_docker_sandbox_backend_case_insensitive() {
         );
     }
 }
+
+#[test]
+fn test_remove_dirty_worktree_fails_without_force() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "dirty-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Get the worktree path
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dirty-branch");
+
+    // Make uncommitted changes
+    std::fs::write(worktree_path.join("dirty.txt"), "uncommitted change")
+        .expect("Failed to create dirty file");
+
+    // Try to remove without force - should fail
+    let output = test_repo.agentree(&["remove", "dirty-branch"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail with uncommitted changes"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("uncommitted changes") || stderr.contains("modified files"),
+        "Error should mention uncommitted changes: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("agentree remove -f"),
+        "Error should suggest -f flag: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_remove_dirty_worktree_with_force() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "dirty-force-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Get the worktree path
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dirty-force-branch");
+
+    // Make uncommitted changes
+    std::fs::write(worktree_path.join("dirty.txt"), "uncommitted change")
+        .expect("Failed to create dirty file");
+
+    // Remove with -f should succeed
+    let output = test_repo.agentree(&["remove", "-f", "dirty-force-branch"]);
+    assert!(
+        output.status.success(),
+        "remove with -f should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed"), "Should show removal message");
+}
+
+#[test]
+fn test_remove_locked_worktree_fails_without_force() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "locked-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Lock the worktree using git
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("locked-branch");
+    test_repo.git(&[
+        "worktree",
+        "lock",
+        worktree_path.to_str().unwrap(),
+        "--reason",
+        "test lock",
+    ]);
+
+    // Try to remove without force - should fail
+    let output = test_repo.agentree(&["remove", "locked-branch"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail for locked worktree"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("locked"),
+        "Error should mention locked status: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("agentree remove -ff") || stderr.contains("agentree remove --unlock"),
+        "Error should suggest -ff or --unlock: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_remove_locked_worktree_with_double_force() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "locked-ff-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Lock the worktree
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("locked-ff-branch");
+    test_repo.git(&[
+        "worktree",
+        "lock",
+        worktree_path.to_str().unwrap(),
+        "--reason",
+        "test lock",
+    ]);
+
+    // Remove with -ff should succeed
+    let output = test_repo.agentree(&["remove", "-ff", "locked-ff-branch"]);
+    assert!(
+        output.status.success(),
+        "remove with -ff should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed"), "Should show removal message");
+}
+
+#[test]
+fn test_remove_locked_worktree_with_unlock() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "locked-unlock-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Lock the worktree
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("locked-unlock-branch");
+    test_repo.git(&[
+        "worktree",
+        "lock",
+        worktree_path.to_str().unwrap(),
+        "--reason",
+        "test lock",
+    ]);
+
+    // Remove with --unlock should succeed
+    let output = test_repo.agentree(&["remove", "--unlock", "locked-unlock-branch"]);
+    assert!(
+        output.status.success(),
+        "remove with --unlock should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed"), "Should show removal message");
+
+    // Check that unlock message was printed
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Unlocked worktree"),
+        "Should show unlock message: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_remove_unlock_already_unlocked() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree (not locked)
+    let output = test_repo.agentree(&["create", "unlocked-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Remove with --unlock on an already unlocked worktree should work
+    let output = test_repo.agentree(&["remove", "--unlock", "unlocked-branch"]);
+    assert!(
+        output.status.success(),
+        "remove with --unlock should succeed even when not locked: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Removed"), "Should show removal message");
+}
+
+#[test]
+fn test_error_message_includes_path() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree
+    let output = test_repo.agentree(&["create", "path-test-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Lock it
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("path-test-branch");
+    test_repo.git(&[
+        "worktree",
+        "lock",
+        worktree_path.to_str().unwrap(),
+        "--reason",
+        "test",
+    ]);
+
+    // Try to remove without force
+    let output = test_repo.agentree(&["remove", "path-test-branch"]);
+    assert!(!output.status.success(), "remove should fail");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // Error message should include the actual path (checking for branch name in path)
+    assert!(
+        stderr.contains("path-test-branch"),
+        "Error should include worktree path with branch name: {}",
+        stderr
+    );
+    assert!(
+        stderr.contains("Location:"),
+        "Error should have Location label: {}",
+        stderr
+    );
+}
