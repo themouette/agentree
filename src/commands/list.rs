@@ -121,13 +121,11 @@ fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
         .collect();
 
     // Sort by last modified (most recent first)
-    worktrees_with_time.sort_by(|a, b| {
-        match (a.modified, b.modified) {
-            (Some(time_a), Some(time_b)) => time_b.cmp(&time_a),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => std::cmp::Ordering::Equal,
-        }
+    worktrees_with_time.sort_by(|a, b| match (a.modified, b.modified) {
+        (Some(time_a), Some(time_b)) => time_b.cmp(&time_a),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
     });
 
     Ok(worktrees_with_time)
@@ -159,10 +157,7 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
 
 fn render_two_lines(worktrees: &[WorktreeInfo], _repo_root: &Path) -> Result<()> {
     // Header
-    println!(
-        "{:<30} {:<12} {:<20}",
-        "BRANCH", "BACKEND", "MODIFIED"
-    );
+    println!("{:<30} {:<12} {:<20}", "BRANCH", "BACKEND", "MODIFIED");
 
     for info in worktrees {
         let modified = info
@@ -261,12 +256,12 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
 fn make_relative_path(path: &Path, repo_root: &Path) -> String {
     path.strip_prefix(repo_root)
         .ok()
-        .and_then(|p| {
+        .map(|p| {
             // If it's in a sibling directory, show as ../dirname/...
             if let Ok(p) = p.strip_prefix("..") {
-                Some(format!("../{}", p.display()))
+                format!("../{}", p.display())
             } else {
-                Some(p.display().to_string())
+                p.display().to_string()
             }
         })
         .unwrap_or_else(|| {
@@ -286,4 +281,3 @@ fn truncate(s: &str, max_len: usize) -> String {
         s.to_string()
     }
 }
-
