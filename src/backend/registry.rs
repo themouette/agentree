@@ -165,11 +165,12 @@ impl BackendRegistry {
             // Check Docker version
             if let Some(ref min_version) = info.min_version {
                 let version_str = get_binary_version(&info.binary_name, "--version")?;
-                let version =
-                    semver::Version::parse(&version_str).map_err(|e| AgentreeError::VersionParse {
+                let version = semver::Version::parse(&version_str).map_err(|e| {
+                    AgentreeError::VersionParse {
                         version: version_str.clone(),
                         error: e.to_string(),
-                    })?;
+                    }
+                })?;
 
                 if !min_version.matches(&version) {
                     return Err(AgentreeError::DockerSandboxNotSupported {

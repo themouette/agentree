@@ -996,9 +996,7 @@ fn is_docker_available() -> bool {
     }
 
     // Check if Docker daemon is running
-    let output = Command::new("docker")
-        .arg("info")
-        .output();
+    let output = Command::new("docker").arg("info").output();
 
     match output {
         Ok(output) => output.status.success(),

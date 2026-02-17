@@ -92,7 +92,11 @@ impl DockerSandboxBackend {
     /// Check if a sandbox exists
     fn sandbox_exists(&self, workspace_path: &Path) -> Result<bool> {
         let name = self.sandbox_name(workspace_path);
-        let output = run_captured(&self.binary, &["sandbox", "ls", "--format", "{{.Name}}"], workspace_path)?;
+        let output = run_captured(
+            &self.binary,
+            &["sandbox", "ls", "--format", "{{.Name}}"],
+            workspace_path,
+        )?;
 
         if !output.success() {
             return Ok(false);
@@ -111,7 +115,11 @@ impl DockerSandboxBackend {
             return Ok(()); // Already removed
         }
 
-        let output = run_captured(&self.binary, &["sandbox", "rm", "-f", &name], workspace_path)?;
+        let output = run_captured(
+            &self.binary,
+            &["sandbox", "rm", "-f", &name],
+            workspace_path,
+        )?;
 
         if !output.success() {
             return Err(AgentreeError::BackendExecution {
@@ -140,11 +148,9 @@ impl DockerSandboxBackend {
         let original_dir = std::env::current_dir()?;
 
         // Change to workspace directory to run git commands
-        std::env::set_current_dir(workspace_path).map_err(|e| {
-            AgentreeError::BackendExecution {
-                backend: "docker-sandbox".to_string(),
-                error: format!("Failed to change to workspace directory: {}", e),
-            }
+        std::env::set_current_dir(workspace_path).map_err(|e| AgentreeError::BackendExecution {
+            backend: "docker-sandbox".to_string(),
+            error: format!("Failed to change to workspace directory: {}", e),
         })?;
 
         // Get git common directory, ensuring we restore original dir in all paths
@@ -193,12 +199,13 @@ impl Default for DockerSandboxBackend {
 
 impl Backend for DockerSandboxBackend {
     fn shell(&self, workspace_path: &Path) -> Result<()> {
-        let workspace_str = workspace_path
-            .to_str()
-            .ok_or_else(|| AgentreeError::BackendExecution {
-                backend: "docker-sandbox".to_string(),
-                error: format!("Invalid workspace path: {}", workspace_path.display()),
-            })?;
+        let workspace_str =
+            workspace_path
+                .to_str()
+                .ok_or_else(|| AgentreeError::BackendExecution {
+                    backend: "docker-sandbox".to_string(),
+                    error: format!("Invalid workspace path: {}", workspace_path.display()),
+                })?;
 
         // Get git mount arguments if this is a worktree
         let git_mounts = self.get_git_mount_args(workspace_path)?;
@@ -219,12 +226,13 @@ impl Backend for DockerSandboxBackend {
     }
 
     fn agent(&self, workspace_path: &Path, agent: Option<&str>, flags: &[String]) -> Result<()> {
-        let workspace_str = workspace_path
-            .to_str()
-            .ok_or_else(|| AgentreeError::BackendExecution {
-                backend: "docker-sandbox".to_string(),
-                error: format!("Invalid workspace path: {}", workspace_path.display()),
-            })?;
+        let workspace_str =
+            workspace_path
+                .to_str()
+                .ok_or_else(|| AgentreeError::BackendExecution {
+                    backend: "docker-sandbox".to_string(),
+                    error: format!("Invalid workspace path: {}", workspace_path.display()),
+                })?;
 
         match agent {
             Some(agent_name) => {
@@ -278,8 +286,7 @@ mod tests {
 
     #[test]
     fn test_with_binary_stores_custom_binary() {
-        let backend = DockerSandboxBackend::new()
-            .with_binary("/custom/docker".to_string());
+        let backend = DockerSandboxBackend::new().with_binary("/custom/docker".to_string());
         assert_eq!(backend.binary, "/custom/docker");
     }
 
@@ -368,7 +375,7 @@ mod tests {
     #[test]
     fn test_should_mount_git_default() {
         let backend = DockerSandboxBackend::new();
-        assert_eq!(backend.should_mount_git(), true);
+        assert!(backend.should_mount_git());
     }
 
     #[test]
@@ -381,7 +388,7 @@ mod tests {
         };
 
         let backend = DockerSandboxBackend::new().with_config(config);
-        assert_eq!(backend.should_mount_git(), true);
+        assert!(backend.should_mount_git());
     }
 
     #[test]
@@ -394,7 +401,6 @@ mod tests {
         };
 
         let backend = DockerSandboxBackend::new().with_config(config);
-        assert_eq!(backend.should_mount_git(), false);
+        assert!(!backend.should_mount_git());
     }
-
 }

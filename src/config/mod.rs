@@ -19,7 +19,7 @@ pub struct BackendConfig {
 }
 
 /// Docker Sandbox backend configuration
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct DockerSandboxConfig {
     /// Custom docker binary path
@@ -34,17 +34,6 @@ pub struct DockerSandboxConfig {
     /// the main repository's .git directory at the same path as on the host
     /// Use None to inherit from lower-precedence config, or Some(bool) to override
     pub mount_main_git: Option<bool>,
-}
-
-impl Default for DockerSandboxConfig {
-    fn default() -> Self {
-        Self {
-            binary: None,
-            network_policy: None,
-            persistent: None,
-            mount_main_git: None,
-        }
-    }
 }
 
 /// Information about a specific AI agent
@@ -162,8 +151,14 @@ impl Config {
                     .docker_sandbox
                     .network_policy
                     .or(self.docker_sandbox.network_policy),
-                persistent: other.docker_sandbox.persistent.or(self.docker_sandbox.persistent),
-                mount_main_git: other.docker_sandbox.mount_main_git.or(self.docker_sandbox.mount_main_git),
+                persistent: other
+                    .docker_sandbox
+                    .persistent
+                    .or(self.docker_sandbox.persistent),
+                mount_main_git: other
+                    .docker_sandbox
+                    .mount_main_git
+                    .or(self.docker_sandbox.mount_main_git),
             },
         }
     }

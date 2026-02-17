@@ -90,7 +90,11 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
                         println!("Removed worktree for branch '{}'", branch);
 
                         // Cleanup backend resources (e.g., Docker sandboxes)
-                        cleanup_backend_resources(&workspace_path, config.effective_backend(), &config);
+                        cleanup_backend_resources(
+                            &workspace_path,
+                            config.effective_backend(),
+                            &config,
+                        );
                     }
                     Err(e) => {
                         eprintln!("Warning: Failed to remove worktree for '{}': {}", branch, e);
