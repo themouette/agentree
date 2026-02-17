@@ -144,8 +144,10 @@ impl DockerSandboxBackend {
             return Ok(args);
         }
 
-        // Change to workspace directory to run git commands
+        // Save original directory and ensure it's restored in all code paths
         let original_dir = std::env::current_dir()?;
+
+        // Change to workspace directory to run git commands
         std::env::set_current_dir(workspace_path).map_err(|e| {
             AgentreeError::BackendExecution {
                 backend: "docker-sandbox".to_string(),
@@ -153,13 +155,24 @@ impl DockerSandboxBackend {
             }
         })?;
 
-        // Check if this is a worktree and get the common git directory
-        let git_common_dir = git::get_git_common_dir()
-            .and_then(|opt| {
-                std::env::set_current_dir(&original_dir)?;
-                Ok(opt)
-            })
-            .unwrap_or(None);
+        // Get git common directory, ensuring we restore original dir in all paths
+        let git_common_dir = match git::get_git_common_dir() {
+            Ok(dir) => {
+                // Restore directory before processing result
+                std::env::set_current_dir(&original_dir).map_err(|e| {
+                    AgentreeError::BackendExecution {
+                        backend: "docker-sandbox".to_string(),
+                        error: format!("Failed to restore original directory: {}", e),
+                    }
+                })?;
+                dir
+            }
+            Err(e) => {
+                // Restore directory even on error (ignore restoration errors to preserve original error)
+                let _ = std::env::set_current_dir(&original_dir);
+                return Err(e);
+            }
+        };
 
         // If we have a git common dir and it's different from workspace/.git, mount it
         if let Some(git_dir) = git_common_dir {
