@@ -2,6 +2,7 @@ use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
 use crate::worktree::{doctor, validation};
+use chrono::{DateTime, Utc};
 use clap::Parser;
 use serde::Serialize;
 
@@ -169,8 +170,9 @@ fn display_json(report: &doctor::DiagnosticReport) -> Result<()> {
         })
         .collect();
 
+    let scan_time: DateTime<Utc> = report.scan_time.into();
     let output = JsonOutput {
-        scan_time: format!("{:?}", report.scan_time),
+        scan_time: scan_time.to_rfc3339(),
         issues: json_issues,
         summary: JsonSummary {
             total: report.issues.len(),
