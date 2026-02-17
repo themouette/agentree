@@ -18,7 +18,6 @@ pub struct ListArgs {
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
-#[allow(clippy::enum_variant_names)]
 pub enum OutputFormat {
     /// Two-line format: summary line + absolute path on second line (default)
     TwoLines,
