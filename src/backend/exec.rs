@@ -33,9 +33,17 @@ impl ExecOutput {
 
 /// Run a command interactively (inherits stdio)
 pub fn run_interactive(binary: &str, args: &[&str], working_dir: &Path) -> Result<()> {
+    // Extract branch name from workspace path for environment variable
+    // Workspace paths typically follow pattern: .../agentree-{branch}
+    let branch = extract_branch_from_path(working_dir);
+
     let status = Command::new(binary)
         .args(args)
         .current_dir(working_dir)
+        // Set agentree-specific environment variables for prompt customization
+        .env("AGENTREE_WORKSPACE", "1")
+        .env("AGENTREE_BRANCH", branch)
+        .env("AGENTREE_WORKSPACE_PATH", working_dir)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -53,6 +61,28 @@ pub fn run_interactive(binary: &str, args: &[&str], working_dir: &Path) -> Resul
     }
 
     Ok(())
+}
+
+/// Extract branch name from workspace path
+///
+/// Attempts to extract the branch name from the workspace directory name.
+/// Common patterns: "agentree-{branch}" or "{repo}-{branch}"
+/// Falls back to the directory name if pattern doesn't match.
+fn extract_branch_from_path(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|name| {
+            // Try to extract from "agentree-{branch}" pattern
+            name.strip_prefix("agentree-")
+                // Or from "{repo}-{branch}" pattern (take after last dash)
+                .or_else(|| name.rsplit_once('-').map(|(_, branch)| branch))
+        })
+        .unwrap_or_else(|| {
+            // Fallback: use the whole directory name
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+        })
 }
 
 /// Run a command and capture output
