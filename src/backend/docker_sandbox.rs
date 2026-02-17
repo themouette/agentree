@@ -53,7 +53,7 @@ impl DockerSandboxBackend {
     fn should_mount_git(&self) -> bool {
         self.config
             .as_ref()
-            .map(|c| c.mount_main_git)
+            .and_then(|c| c.mount_main_git)
             .unwrap_or(true)
     }
 
@@ -362,8 +362,8 @@ mod tests {
         let config = crate::config::DockerSandboxConfig {
             binary: Some("/custom/docker".to_string()),
             network_policy: Some("restricted".to_string()),
-            persistent: false,
-            mount_main_git: false,
+            persistent: Some(false),
+            mount_main_git: Some(false),
         };
 
         let backend = DockerSandboxBackend::new().with_config(config.clone());
@@ -381,8 +381,8 @@ mod tests {
         let config = crate::config::DockerSandboxConfig {
             binary: None,
             network_policy: None,
-            persistent: true,
-            mount_main_git: true,
+            persistent: Some(true),
+            mount_main_git: Some(true),
         };
 
         let backend = DockerSandboxBackend::new().with_config(config);
@@ -394,8 +394,8 @@ mod tests {
         let config = crate::config::DockerSandboxConfig {
             binary: None,
             network_policy: None,
-            persistent: true,
-            mount_main_git: false,
+            persistent: Some(true),
+            mount_main_git: Some(false),
         };
 
         let backend = DockerSandboxBackend::new().with_config(config);

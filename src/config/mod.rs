@@ -27,11 +27,13 @@ pub struct DockerSandboxConfig {
     /// Network policy for sandboxes
     pub network_policy: Option<String>,
     /// Keep sandboxes running (default: true for performance)
-    pub persistent: bool,
+    /// Use None to inherit from lower-precedence config, or Some(bool) to override
+    pub persistent: Option<bool>,
     /// Mount main repo's .git directory for worktrees (default: true)
     /// This ensures git commands work properly in worktrees by mounting
     /// the main repository's .git directory at the same path as on the host
-    pub mount_main_git: bool,
+    /// Use None to inherit from lower-precedence config, or Some(bool) to override
+    pub mount_main_git: Option<bool>,
 }
 
 impl Default for DockerSandboxConfig {
@@ -39,8 +41,8 @@ impl Default for DockerSandboxConfig {
         Self {
             binary: None,
             network_policy: None,
-            persistent: true,
-            mount_main_git: true,
+            persistent: None,
+            mount_main_git: None,
         }
     }
 }
@@ -160,8 +162,8 @@ impl Config {
                     .docker_sandbox
                     .network_policy
                     .or(self.docker_sandbox.network_policy),
-                persistent: other.docker_sandbox.persistent,
-                mount_main_git: other.docker_sandbox.mount_main_git,
+                persistent: other.docker_sandbox.persistent.or(self.docker_sandbox.persistent),
+                mount_main_git: other.docker_sandbox.mount_main_git.or(self.docker_sandbox.mount_main_git),
             },
         }
     }
@@ -639,7 +641,8 @@ mod tests {
         let config = DockerSandboxConfig::default();
         assert_eq!(config.binary, None);
         assert_eq!(config.network_policy, None);
-        assert_eq!(config.persistent, true);
+        assert_eq!(config.persistent, None);
+        assert_eq!(config.mount_main_git, None);
     }
 
     #[test]
@@ -660,7 +663,7 @@ mod tests {
             config.docker_sandbox.network_policy,
             Some("restricted".to_string())
         );
-        assert_eq!(config.docker_sandbox.persistent, false);
+        assert_eq!(config.docker_sandbox.persistent, Some(false));
     }
 
     #[test]
@@ -676,14 +679,14 @@ mod tests {
             Some("/custom/docker".to_string())
         );
         assert_eq!(config.docker_sandbox.network_policy, None);
-        assert_eq!(config.docker_sandbox.persistent, true); // default
+        assert_eq!(config.docker_sandbox.persistent, None); // not specified
     }
 
     #[test]
     fn test_merge_docker_sandbox_config() {
         let mut global = Config::default();
         global.docker_sandbox.binary = Some("/global/docker".to_string());
-        global.docker_sandbox.persistent = false;
+        global.docker_sandbox.persistent = Some(false);
 
         let mut project = Config::default();
         project.docker_sandbox.network_policy = Some("restricted".to_string());
@@ -698,13 +701,13 @@ mod tests {
             merged.docker_sandbox.network_policy,
             Some("restricted".to_string())
         );
-        assert_eq!(merged.docker_sandbox.persistent, true); // project overrides
+        assert_eq!(merged.docker_sandbox.persistent, Some(false)); // global value preserved since project didn't override
     }
 
     #[test]
     fn test_docker_sandbox_config_mount_main_git_default() {
         let config = DockerSandboxConfig::default();
-        assert_eq!(config.mount_main_git, true);
+        assert_eq!(config.mount_main_git, None);
     }
 
     #[test]
@@ -715,7 +718,7 @@ mod tests {
         "#;
 
         let config: Config = toml::from_str(toml).unwrap();
-        assert_eq!(config.docker_sandbox.mount_main_git, false);
+        assert_eq!(config.docker_sandbox.mount_main_git, Some(false));
     }
 
     #[test]
@@ -737,7 +740,7 @@ mod tests {
             config.docker_sandbox.network_policy,
             Some("restricted".to_string())
         );
-        assert_eq!(config.docker_sandbox.persistent, false);
-        assert_eq!(config.docker_sandbox.mount_main_git, false);
+        assert_eq!(config.docker_sandbox.persistent, Some(false));
+        assert_eq!(config.docker_sandbox.mount_main_git, Some(false));
     }
 }
