@@ -754,6 +754,71 @@ fn test_remove_merged_cleanup() {
 }
 
 #[test]
+fn test_remove_merged_default_current_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for feature branch
+    let output = test_repo.agentree(&["create", "feature-auto"]);
+    assert!(
+        output.status.success(),
+        "create should succeed: {:?}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Switch to worktree and create a commit
+    let worktrees_dir = test_repo.worktrees_dir();
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = worktrees_dir.join(repo_name).join("feature-auto");
+
+    std::fs::write(worktree_path.join("feature.txt"), "feature content")
+        .expect("Failed to create file in worktree");
+
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git add should work");
+
+    Command::new("git")
+        .args(["commit", "-m", "Add feature file"])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git commit should work");
+
+    // Merge the branch into main (in main repo)
+    test_repo.git(&["merge", "--no-ff", "feature-auto", "-m", "Merge feature"]);
+
+    // Verify current branch is main
+    let current_branch = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("git symbolic-ref should work");
+    let branch = String::from_utf8_lossy(&current_branch.stdout)
+        .trim()
+        .to_string();
+    assert_eq!(branch, "main", "Should be on main branch");
+
+    // Run remove --merged without argument (should use current branch = main)
+    let output = test_repo.agentree(&["remove", "--merged"]);
+    assert!(
+        output.status.success(),
+        "remove --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Verify the worktree is removed
+    let output = test_repo.agentree(&["list"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("feature-auto"),
+        "feature-auto should be removed after --merged cleanup"
+    );
+}
+
+#[test]
 fn test_exec_autocreates_and_runs_command() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
