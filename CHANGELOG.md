@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `remove --merged` now defaults to current branch when no base branch is specified
+  - Use `agentree rm --merged` to remove all worktrees merged into your current branch
+  - Explicitly specify a base with `agentree rm --merged main` if needed
 - Docker Sandbox backend (`docker-sandbox`) for microVM-based isolation:
   - Hypervisor-level isolation using Docker Desktop's sandbox feature (Engine 29.1.5+)
   - Platform support: macOS and Windows (microVMs not available on Linux)

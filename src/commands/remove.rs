@@ -1,7 +1,7 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::get_git_root;
+use crate::utils::git::{get_current_branch, get_git_root};
 use crate::worktree::operations::ForceLevel;
 use crate::worktree::{operations, recovery, validation};
 use clap::Parser;
@@ -12,8 +12,8 @@ pub struct RemoveArgs {
     #[arg(required_unless_present = "merged")]
     pub branches: Vec<String>,
 
-    /// Remove all branches merged into BASE
-    #[arg(long, conflicts_with = "branches")]
+    /// Remove all branches merged into BASE (defaults to current branch if not specified)
+    #[arg(long, conflicts_with = "branches", num_args = 0..=1, default_missing_value = "HEAD")]
     pub merged: Option<String>,
 
     /// Force removal even with uncommitted changes or locked status
@@ -83,6 +83,13 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
     // Handle --merged mode
     if let Some(base) = args.merged {
+        // Resolve base branch: if "HEAD" sentinel, use current branch
+        let base = if base == "HEAD" {
+            get_current_branch()?
+        } else {
+            base
+        };
+
         // Get all merged branches
         let merged_branches = operations::list_merged_branches(&base)?;
 
