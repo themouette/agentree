@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `list` command now defaults to `card` format instead of `two-lines`, showing full
+  branch names, absolute paths, and all metadata without truncation.
 - Creation messages now distinguish between two cases:
   - Worktree added for an existing branch: `Created worktree for branch 'X' at <path>`
   - Branch and worktree both created: `Created branch 'X' and worktree at <path>`
