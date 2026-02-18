@@ -186,12 +186,49 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
 fn format_created_date(created: Option<&String>) -> String {
     created
         .and_then(|c| {
-            use chrono::DateTime;
-            DateTime::parse_from_rfc3339(c)
-                .ok()
-                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            use chrono::{DateTime, Local};
+            DateTime::parse_from_rfc3339(c).ok().map(|dt| {
+                let local = dt.with_timezone(&Local);
+                let ago = format_time_ago(local.into());
+                format!("{} ({})", local.format("%Y-%m-%d %H:%M"), ago)
+            })
         })
         .unwrap_or_else(|| "-".to_string())
+}
+
+/// Format a `SystemTime` as a human-readable relative duration, e.g. "3 months ago".
+fn format_time_ago(time: std::time::SystemTime) -> String {
+    use chrono::{DateTime, Local};
+    let datetime: DateTime<Local> = time.into();
+    let now = Local::now();
+    let duration = now.signed_duration_since(datetime);
+
+    let secs = duration.num_seconds();
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    let mins = duration.num_minutes();
+    if mins < 60 {
+        return format!("{} minute{} ago", mins, if mins == 1 { "" } else { "s" });
+    }
+    let hours = duration.num_hours();
+    if hours < 24 {
+        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
+    }
+    let days = duration.num_days();
+    if days < 7 {
+        return format!("{} day{} ago", days, if days == 1 { "" } else { "s" });
+    }
+    let weeks = days / 7;
+    if weeks < 5 {
+        return format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" });
+    }
+    let months = days / 30;
+    if months < 12 {
+        return format!("{} month{} ago", months, if months == 1 { "" } else { "s" });
+    }
+    let years = days / 365;
+    format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
 }
 
 fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
@@ -313,7 +350,11 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
 
         let modified = info
             .modified
-            .map(operations::format_activity)
+            .map(|t| {
+                use chrono::{DateTime, Local};
+                let dt: DateTime<Local> = t.into();
+                format!("{} ({})", dt.format("%Y-%m-%d %H:%M"), format_time_ago(t))
+            })
             .unwrap_or_else(|| "Unknown".to_string());
 
         println!("┌─ {}", info.branch);
@@ -538,5 +579,49 @@ mod tests {
             DirtyStatus::Dirty => Some(true),
         };
         assert_eq!(dirty, Some(true));
+    }
+
+    fn ago(secs: u64) -> std::time::SystemTime {
+        std::time::SystemTime::now() - std::time::Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn test_format_time_ago_just_now() {
+        assert_eq!(format_time_ago(ago(30)), "just now");
+    }
+
+    #[test]
+    fn test_format_time_ago_minutes() {
+        assert_eq!(format_time_ago(ago(90)), "1 minute ago");
+        assert_eq!(format_time_ago(ago(300)), "5 minutes ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_hours() {
+        assert_eq!(format_time_ago(ago(3600)), "1 hour ago");
+        assert_eq!(format_time_ago(ago(7200)), "2 hours ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_days() {
+        assert_eq!(format_time_ago(ago(86400)), "1 day ago");
+        assert_eq!(format_time_ago(ago(86400 * 3)), "3 days ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_weeks() {
+        assert_eq!(format_time_ago(ago(86400 * 7)), "1 week ago");
+        assert_eq!(format_time_ago(ago(86400 * 14)), "2 weeks ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_months() {
+        assert_eq!(format_time_ago(ago(86400 * 60)), "2 months ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_years() {
+        assert_eq!(format_time_ago(ago(86400 * 400)), "1 year ago");
+        assert_eq!(format_time_ago(ago(86400 * 800)), "2 years ago");
     }
 }
