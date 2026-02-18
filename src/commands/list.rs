@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::utils::git::{get_git_root, path_to_str, run_git_query};
 use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
+use chrono::{DateTime, Local, Utc};
 use clap::Parser;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -272,7 +273,6 @@ fn populate_dirty_status(worktrees: &mut [WorktreeInfo]) -> Result<()> {
 fn format_created_date(created: Option<&String>) -> String {
     created
         .and_then(|c| {
-            use chrono::{DateTime, Local};
             DateTime::parse_from_rfc3339(c).ok().map(|dt| {
                 let local = dt.with_timezone(&Local);
                 let ago = format_time_ago(local.into());
@@ -284,7 +284,6 @@ fn format_created_date(created: Option<&String>) -> String {
 
 /// Format a `SystemTime` as a human-readable relative duration, e.g. "3 months ago".
 fn format_time_ago(time: std::time::SystemTime) -> String {
-    use chrono::{DateTime, Local};
     let datetime: DateTime<Local> = time.into();
     let now = Local::now();
     let duration = now.signed_duration_since(datetime);
@@ -322,7 +321,6 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
         .iter()
         .map(|info| {
             let modified = info.modified.map(|time| {
-                use chrono::{DateTime, Utc};
                 let datetime: DateTime<Utc> = time.into();
                 datetime.to_rfc3339()
             });
@@ -437,7 +435,6 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
         let modified = info
             .modified
             .map(|t| {
-                use chrono::{DateTime, Local};
                 let dt: DateTime<Local> = t.into();
                 format!("{} ({})", dt.format("%Y-%m-%d %H:%M"), format_time_ago(t))
             })

@@ -2166,10 +2166,7 @@ fn test_remove_clean_filter_removes_clean_worktrees() {
 
     // Make keep-dirty actually dirty
     let repo_name = test_repo.path().file_name().unwrap();
-    let dirty_path = test_repo
-        .worktrees_dir()
-        .join(repo_name)
-        .join("keep-dirty");
+    let dirty_path = test_repo.worktrees_dir().join(repo_name).join("keep-dirty");
     std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
 
     let output = test_repo.agentree(&["remove", "--clean"]);
