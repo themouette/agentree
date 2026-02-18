@@ -230,7 +230,7 @@ fn test_remove_nonexistent() {
 }
 
 #[test]
-fn test_create_idempotent() {
+fn test_create_fails_if_exists() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
@@ -241,14 +241,17 @@ fn test_create_idempotent() {
     let stdout1 = String::from_utf8_lossy(&output.stdout);
     assert!(stdout1.contains("Created"), "First call should create");
 
-    // Create the same worktree again (idempotent)
+    // Create the same worktree again — must fail with a helpful hint
     let output = test_repo.agentree(&["create", "idempotent-test"]);
     assert!(
-        output.status.success(),
-        "Second create should succeed (idempotent)"
+        !output.status.success(),
+        "Second create should fail: worktree already exists"
     );
-    let stdout2 = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout2.contains("Resuming"), "Second call should resume");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already exists") || stderr.contains("agentree agent"),
+        "Error should mention the existing worktree or suggest 'agentree agent'"
+    );
 }
 
 #[test]
