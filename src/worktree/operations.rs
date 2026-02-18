@@ -23,16 +23,28 @@ pub enum BranchStatus {
 pub enum CreateResult {
     /// Branch already had a worktree; returning existing path
     Resumed(PathBuf),
-    /// New worktree created at this path
+    /// New worktree created for an existing branch
     Created(PathBuf),
+    /// New branch and worktree were both created
+    CreatedWithBranch(PathBuf),
 }
 
 impl CreateResult {
-    /// Get the worktree path regardless of whether it was created or resumed
+    /// Get the worktree path regardless of outcome
     pub fn path(&self) -> &PathBuf {
         match self {
-            CreateResult::Resumed(path) | CreateResult::Created(path) => path,
+            CreateResult::Resumed(path)
+            | CreateResult::Created(path)
+            | CreateResult::CreatedWithBranch(path) => path,
         }
+    }
+
+    /// Returns true if a new worktree (or branch + worktree) was created
+    pub fn was_created(&self) -> bool {
+        matches!(
+            self,
+            CreateResult::Created(_) | CreateResult::CreatedWithBranch(_)
+        )
     }
 
     /// Generate user-facing message for this result
@@ -48,6 +60,13 @@ impl CreateResult {
             CreateResult::Created(path) => {
                 format!(
                     "Created worktree for branch '{}' at {}",
+                    branch,
+                    path.display()
+                )
+            }
+            CreateResult::CreatedWithBranch(path) => {
+                format!(
+                    "Created branch '{}' and worktree at {}",
                     branch,
                     path.display()
                 )
@@ -302,7 +321,7 @@ pub fn create_worktree(
 
             run_git_command(&args, "create worktree")?;
 
-            Ok(CreateResult::Created(worktree_path))
+            Ok(CreateResult::CreatedWithBranch(worktree_path))
         }
     }
 }
@@ -486,39 +505,44 @@ mod tests {
 
     #[test]
     fn test_create_result_variants() {
-        // Test that CreateResult variants exist and can be compared
         let result1 = CreateResult::Resumed(PathBuf::from("/test"));
         let result2 = CreateResult::Resumed(PathBuf::from("/test"));
         let result3 = CreateResult::Created(PathBuf::from("/test"));
+        let result4 = CreateResult::CreatedWithBranch(PathBuf::from("/test"));
 
         assert_eq!(result1, result2);
         assert_ne!(result1, result3);
+        assert_ne!(result3, result4);
     }
 
     #[test]
     fn test_create_result_path() {
-        let path1 = PathBuf::from("/test");
-        let result1 = CreateResult::Resumed(path1.clone());
-        assert_eq!(result1.path(), &path1);
+        let path = PathBuf::from("/test");
+        assert_eq!(CreateResult::Resumed(path.clone()).path(), &path);
+        assert_eq!(CreateResult::Created(path.clone()).path(), &path);
+        assert_eq!(CreateResult::CreatedWithBranch(path.clone()).path(), &path);
+    }
 
-        let path2 = PathBuf::from("/test2");
-        let result2 = CreateResult::Created(path2.clone());
-        assert_eq!(result2.path(), &path2);
+    #[test]
+    fn test_create_result_was_created() {
+        let path = PathBuf::from("/test");
+        assert!(!CreateResult::Resumed(path.clone()).was_created());
+        assert!(CreateResult::Created(path.clone()).was_created());
+        assert!(CreateResult::CreatedWithBranch(path.clone()).was_created());
     }
 
     #[test]
     fn test_create_result_message() {
         let path = PathBuf::from("/tmp/worktrees/feature");
 
-        let resumed = CreateResult::Resumed(path.clone());
-        let msg = resumed.message("feature");
-        assert!(msg.contains("Resuming"));
-        assert!(msg.contains("feature"));
+        let msg = CreateResult::Resumed(path.clone()).message("feature");
+        assert!(msg.contains("Resuming") && msg.contains("feature"));
 
-        let created = CreateResult::Created(path.clone());
-        let msg = created.message("feature");
-        assert!(msg.contains("Created"));
-        assert!(msg.contains("feature"));
+        let msg = CreateResult::Created(path.clone()).message("feature");
+        assert!(msg.contains("Created worktree") && msg.contains("feature"));
+
+        let msg = CreateResult::CreatedWithBranch(path.clone()).message("feature");
+        assert!(msg.contains("Created branch") && msg.contains("feature"));
     }
 
     #[test]

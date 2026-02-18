@@ -7,12 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Creation messages now distinguish between two cases:
+  - Worktree added for an existing branch: `Created worktree for branch 'X' at <path>`
+  - Branch and worktree both created: `Created branch 'X' and worktree at <path>`
+- `clean` command now runs `git worktree repair` before `git worktree prune`, fixing
+  the case where broken gitdir links would cause valid worktrees to be incorrectly pruned.
+
 ### Fixed
 
 - Creating a branch from a remote tracking ref (e.g. `agentree create my-branch -b origin/preprod`)
   no longer silently sets the new branch's upstream to the remote branch. `--no-track` is now
   passed to `git worktree add` so the new branch is always free-standing, and `git push` behaves
-  as expected.
+  as expected.  
+- Significant performance regression introduced in 0.5.0: `git worktree repair` was
+  being run before every command (list, cd, remove, create, etc.) via `ensure_clean_state()`.
+  `git worktree repair` is a filesystem-intensive operation and caused noticeable slowdowns
+  on each invocation.
+- Interactive prune prompt in `ensure_clean_state()` could block non-interactive use
+  (scripts, CI) waiting for user input. The prompt has been removed from the hot path.
+- `ensure_clean_state()` now only runs a lightweight `git worktree prune --dry-run` check
+  and prints a warning with `agentree doctor --fix` guidance when stale metadata is found.
+  Actual repair and pruning are left to the explicit `clean` and `doctor` commands.
+
 ### Added
 
 - New `doctor` command to check worktree health and fix issues:

@@ -166,14 +166,14 @@ impl WorkspaceContext {
         let result =
             operations::ensure_workspace(&self.config.worktree, &self.repo_root, branch, base)?;
 
-        let was_created = matches!(result, operations::CreateResult::Created(_));
+        let was_created = result.was_created();
 
         // Save metadata for newly created workspaces
         if was_created {
             let metadata = WorktreeMetadata::new(self.config.effective_backend().to_string());
             metadata.save(result.path())?;
-            println!("{}", result.message(branch));
         }
+        eprintln!("{}", result.message(branch));
 
         // Validate path accessibility for backend
         validate_workspace_path(result.path(), &self.config.effective_backend())?;

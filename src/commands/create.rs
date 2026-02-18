@@ -17,7 +17,7 @@ pub fn execute(args: CreateArgs) -> Result<()> {
         None, // agent not used in create command
     )?;
 
-    // Create the worktree (not ensure_workspace, create always fails if exists)
+    // Create the worktree; resumes silently if the branch already has one
     let result = operations::create_worktree(
         &ctx.config.worktree,
         &ctx.repo_root,
@@ -26,7 +26,7 @@ pub fn execute(args: CreateArgs) -> Result<()> {
     )?;
 
     // Save metadata for newly created worktrees
-    if let operations::CreateResult::Created(_) = result {
+    if result.was_created() {
         let metadata = WorktreeMetadata::new(ctx.config.effective_backend().to_string());
         metadata.save(result.path())?;
     }
