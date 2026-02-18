@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the merged-branch list the command would try (and fail) to delete it. A new
   `list_linked_worktrees()` helper in `recovery` centralises the skip-first-entry
   logic and is now used by both `remove --merged` and `list`.
+- `agentree create` (and any command that creates a worktree) no longer times out
+  after 30 seconds on large repositories or repos with slow post-checkout hooks.
+  `git worktree add` is now run without a timeout, matching the behaviour of running
+  git directly; other git operations (list, prune, ref queries) retain the 30-second
+  safety timeout. The timeout on those operations remains configurable via the
+  `AGENTREE_GIT_TIMEOUT` environment variable.
 - Creating a branch from a remote tracking ref (e.g. `agentree create my-branch -b origin/preprod`)
   no longer silently sets the new branch's upstream to the remote branch. `--no-track` is now
   passed to `git worktree add` so the new branch is always free-standing, and `git push` behaves

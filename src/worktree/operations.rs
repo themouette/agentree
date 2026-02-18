@@ -1,5 +1,5 @@
 use crate::error::{AgentreeError, Result};
-use crate::utils::git::{run_git_command, run_git_query};
+use crate::utils::git::{run_git_command, run_git_command_no_timeout, run_git_query};
 use crate::worktree::config::WorktreeConfig;
 use crate::worktree::recovery::ensure_clean_state;
 use crate::worktree::template::{compute_worktree_path, TemplateContext};
@@ -293,7 +293,7 @@ pub fn create_worktree(
             remove_orphaned_directory(&worktree_path)?;
 
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
-            run_git_command(&["worktree", "add", path_str, branch], "create worktree")?;
+            run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")?;
 
             Ok(CreateResult::Created(worktree_path))
         }
@@ -319,7 +319,7 @@ pub fn create_worktree(
                 args.push(base_branch);
             }
 
-            run_git_command(&args, "create worktree")?;
+            run_git_command_no_timeout(&args, "create worktree")?;
 
             Ok(CreateResult::CreatedWithBranch(worktree_path))
         }
