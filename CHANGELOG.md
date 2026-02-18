@@ -39,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - No spinner for instant resume (worktree already exists)
   - Spinner is automatically hidden in non-TTY environments (CI, scripts, piped output)
   - Applies to: `create`, `remove`, `shell`, `agent`, `exec`, `cd`
+- `cd` now auto-creates the branch and worktree when they do not exist, accepting the
+  same `-b/--base`, `--backend`, and `--worktree-location` flags as other workspace commands.
+  Previously `cd` required the worktree to already exist.
 - New `doctor` command to check worktree health and fix issues:
   - Detects orphaned directories (exist but not tracked by git)
   - Detects broken metadata (git knows about but directory missing/corrupt)
