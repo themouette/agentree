@@ -94,8 +94,8 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         // Get all merged branches
         let merged_branches = operations::list_merged_branches(&base)?;
 
-        // Get current worktrees
-        let worktrees = recovery::ensure_clean_state()?;
+        // Get linked worktrees only (excludes main repo and detached HEADs)
+        let worktrees = recovery::list_linked_worktrees()?;
 
         // Find which merged branches have worktrees
         let mut removed_count = 0;

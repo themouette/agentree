@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `remove --merged` no longer attempts to remove the main repository. `git worktree
+  list` always includes the main repo as its first entry; the `--merged` path was
+  iterating all entries without skipping it, so if the main repo's branch appeared in
+  the merged-branch list the command would try (and fail) to delete it. A new
+  `list_linked_worktrees()` helper in `recovery` centralises the skip-first-entry
+  logic and is now used by both `remove --merged` and `list`.
 - Creating a branch from a remote tracking ref (e.g. `agentree create my-branch -b origin/preprod`)
   no longer silently sets the new branch's upstream to the remote branch. `--no-track` is now
   passed to `git worktree add` so the new branch is always free-standing, and `git push` behaves
