@@ -1,4 +1,4 @@
-use crate::commands::filters::{resolve_head_sentinel, WorktreeFilterArgs};
+use crate::commands::filters::{glob_match, resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::{get_git_root, path_to_str, run_git_query};
@@ -166,6 +166,10 @@ fn apply_list_filters(
     // --locked filter: keep only locked worktrees
     if filters.only_locked {
         worktrees.retain(|w| w.locked.is_some());
+    }
+    // --branch filter: keep only branches matching PATTERN
+    if let Some(ref pattern) = filters.branch_pattern {
+        worktrees.retain(|w| glob_match(pattern, &w.branch));
     }
     Ok(())
 }

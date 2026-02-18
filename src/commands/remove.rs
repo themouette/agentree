@@ -1,5 +1,5 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
-use crate::commands::filters::{resolve_head_sentinel, WorktreeFilterArgs};
+use crate::commands::filters::{glob_match, resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -12,7 +12,13 @@ use clap::Parser;
 pub struct RemoveArgs {
     /// Branch names to remove (can specify multiple).
     /// Mutually exclusive with filter flags (--merged, --not-merged, etc.).
-    #[arg(required_unless_present_any = ["merged", "not_merged", "only_locked", "only_dirty"])]
+    #[arg(required_unless_present_any = [
+        "merged",
+        "not_merged",
+        "only_locked",
+        "only_dirty",
+        "branch_pattern"
+    ])]
     pub branches: Vec<String>,
 
     /// Force removal even with uncommitted changes or locked status
@@ -149,6 +155,15 @@ fn apply_entry_filters(
     // --locked: keep only locked worktrees
     if filters.only_locked {
         entries.retain(|e| e.locked.is_some());
+    }
+    // --branch: keep only branches matching PATTERN
+    if let Some(ref pattern) = filters.branch_pattern {
+        entries.retain(|e| {
+            e.branch
+                .as_deref()
+                .map(|b| glob_match(pattern, b))
+                .unwrap_or(false)
+        });
     }
     Ok(())
 }

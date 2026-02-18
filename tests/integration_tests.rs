@@ -1992,6 +1992,62 @@ fn test_remove_dirty_filter_removes_dirty_worktrees() {
     );
 }
 
+// ─── --branch pattern filter ─────────────────────────────────────────────────
+
+#[test]
+fn test_list_branch_pattern_filter() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "feature-one"]);
+    test_repo.agentree(&["create", "feature-two"]);
+    test_repo.agentree(&["create", "bugfix-one"]);
+
+    let output = test_repo.agentree(&["list", "--branch", "feature-*", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --branch should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("feature-one"), "Should show feature-one");
+    assert!(stdout.contains("feature-two"), "Should show feature-two");
+    assert!(
+        !stdout.contains("bugfix-one"),
+        "Should not show bugfix-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_branch_pattern_filter() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "wip-alpha"]);
+    test_repo.agentree(&["create", "wip-beta"]);
+    test_repo.agentree(&["create", "release-v1"]);
+
+    let output = test_repo.agentree(&["remove", "--branch", "wip-*"]);
+    assert!(
+        output.status.success(),
+        "remove --branch should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(!stdout.contains("wip-alpha"), "wip-alpha should be removed");
+    assert!(!stdout.contains("wip-beta"), "wip-beta should be removed");
+    assert!(
+        stdout.contains("release-v1"),
+        "release-v1 should still be present: {}",
+        stdout
+    );
+}
+
 // ─── --locked filter ─────────────────────────────────────────────────────────
 
 #[test]
