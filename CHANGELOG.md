@@ -56,6 +56,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Locked status is free — data comes from the existing `git worktree list --porcelain` call
 - New `--no-dirty-check` flag for `list` command: skips the per-worktree `git status` calls for
   faster output (useful for large repos or scripts where dirty status is not needed)
+- `remove --dry-run` flag to preview what would be removed without making any changes:
+  - Works with explicit branches (`agentree remove --dry-run feat-x`) and all filter flags
+  - Prints "Would remove N worktrees:" with each candidate branch and path
+  - Exits successfully without touching git metadata or the filesystem
+  - Most useful combined with filter flags: `agentree remove --dry-run --merged main`
 - Filter flags for both `list` and `remove` commands to select worktrees by status:
   - `--merged [BASE]` — only worktrees whose branch is merged into BASE (defaults to current branch)
   - `--not-merged [BASE]` — inverse of `--merged`

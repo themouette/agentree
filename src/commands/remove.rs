@@ -42,6 +42,10 @@ pub struct RemoveArgs {
     #[arg(long)]
     pub unlock: bool,
 
+    /// Show what would be removed without actually removing anything
+    #[arg(long)]
+    pub dry_run: bool,
+
     #[command(flatten)]
     pub filters: WorktreeFilterArgs,
 }
@@ -94,11 +98,31 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
 
     // Filter mode: no explicit branches given — select candidates via filter flags
     if args.branches.is_empty() {
-        return remove_by_filters(&args.filters, args.force, args.unlock, &config);
+        return remove_by_filters(
+            &args.filters,
+            args.force,
+            args.unlock,
+            args.dry_run,
+            &config,
+        );
     }
 
     // Get worktrees to find paths before deletion
     let worktrees = recovery::ensure_clean_state()?;
+
+    // Dry-run: show what would be removed without touching anything
+    if args.dry_run {
+        for branch in &args.branches {
+            let entry = worktrees
+                .iter()
+                .find(|e| e.branch.as_deref() == Some(branch.as_str()));
+            match entry {
+                Some(e) => println!("Would remove: {} ({})", branch, e.path.display()),
+                None => eprintln!("Warning: No worktree found for '{}'", branch),
+            }
+        }
+        return Ok(());
+    }
 
     for branch in &args.branches {
         // Find the workspace path before deleting
@@ -129,6 +153,7 @@ fn remove_by_filters(
     filters: &WorktreeFilterArgs,
     force: u8,
     unlock: bool,
+    dry_run: bool,
     config: &config::Config,
 ) -> Result<()> {
     let mut candidates = recovery::list_linked_worktrees()?;
@@ -158,6 +183,22 @@ fn remove_by_filters(
             "No worktrees match the specified filters.".to_string()
         };
         println!("{}", msg);
+        return Ok(());
+    }
+
+    // Dry-run: show what would be removed without touching anything
+    if dry_run {
+        let noun = if candidates.len() == 1 {
+            "worktree"
+        } else {
+            "worktrees"
+        };
+        println!("Would remove {} {}:", candidates.len(), noun);
+        for entry in &candidates {
+            if let Some(branch) = &entry.branch {
+                println!("  {} ({})", branch, entry.path.display());
+            }
+        }
         return Ok(());
     }
 

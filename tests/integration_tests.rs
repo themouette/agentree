@@ -1255,6 +1255,105 @@ fn test_editor_help_shows_options() {
     );
 }
 
+// ─── remove --dry-run ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_remove_dry_run_does_not_remove_worktree() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["create", "dry-run-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Dry-run: should succeed without removing anything
+    let output = test_repo.agentree(&["remove", "--dry-run", "dry-run-branch"]);
+    assert!(
+        output.status.success(),
+        "remove --dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Would remove"),
+        "Should print dry-run message: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("dry-run-branch"),
+        "Should mention the branch: {}",
+        stdout
+    );
+
+    // Worktree must still exist
+    let list = test_repo.agentree(&["list"]);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("dry-run-branch"),
+        "Worktree should still exist after --dry-run: {}",
+        list_stdout
+    );
+}
+
+#[test]
+fn test_remove_dry_run_merged_filter_does_not_remove() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["create", "dry-merged-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Add a commit and merge it into main
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dry-merged-branch");
+    std::fs::write(wt_path.join("f.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feat"])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    test_repo.git(&["merge", "--no-ff", "dry-merged-branch", "-m", "Merge"]);
+
+    // Dry-run with --merged: should list the candidate without removing it
+    let output = test_repo.agentree(&["remove", "--dry-run", "--merged", "main"]);
+    assert!(
+        output.status.success(),
+        "remove --dry-run --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Would remove"),
+        "Should print dry-run message: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("dry-merged-branch"),
+        "Should mention the matched branch: {}",
+        stdout
+    );
+
+    // Worktree must still exist
+    let list = test_repo.agentree(&["list"]);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("dry-merged-branch"),
+        "Worktree should still exist after --dry-run: {}",
+        list_stdout
+    );
+}
+
 // NOTE: test_completion_includes_editor_command was removed because the
 // completion simplification (commit 720a19c) removed positional branch completion entirely.
 // The test was checking for implementation details (case statements) that no longer exist.
