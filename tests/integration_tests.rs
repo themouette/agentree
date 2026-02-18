@@ -658,6 +658,112 @@ fn test_list_card_format() {
 }
 
 #[test]
+fn test_list_merged_filters_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create two worktrees
+    test_repo.agentree(&["create", "merged-branch"]);
+    test_repo.agentree(&["create", "unmerged-branch"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+
+    // Give unmerged-branch its own commit so it is genuinely not merged
+    let unmerged_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("unmerged-branch");
+    std::fs::write(unmerged_path.join("unmerged.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&unmerged_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&unmerged_path)
+        .output()
+        .expect("git commit should work");
+
+    // Commit something in merged-branch and merge it into main
+    let merged_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("merged-branch");
+    std::fs::write(merged_path.join("merged.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&merged_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Add merged file"])
+        .current_dir(&merged_path)
+        .output()
+        .expect("git commit should work");
+    test_repo.git(&[
+        "merge",
+        "--no-ff",
+        "merged-branch",
+        "-m",
+        "Merge merged-branch",
+    ]);
+
+    // list --merged main should show only merged-branch
+    let output = test_repo.agentree(&["list", "--merged", "main", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("merged-branch"),
+        "Should show merged-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("unmerged-branch"),
+        "Should not show unmerged-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_merged_empty_message() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree with its own commit so it is genuinely not merged
+    test_repo.agentree(&["create", "not-merged"]);
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo.worktrees_dir().join(repo_name).join("not-merged");
+    std::fs::write(worktree_path.join("work.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git commit should work");
+
+    // list --merged main should show the specific empty message
+    let output = test_repo.agentree(&["list", "--merged", "main", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --merged should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No merged worktrees found for 'main'"),
+        "Should show targeted empty message: {}",
+        stdout
+    );
+}
+
+#[test]
 fn test_list_json_format() {
     let test_repo = TestRepo::new();
     test_repo.init_git();

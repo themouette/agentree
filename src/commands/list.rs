@@ -1,6 +1,6 @@
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::{get_git_root, path_to_str, run_git_query};
+use crate::utils::git::{get_current_branch, get_git_root, path_to_str, run_git_query};
 use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use clap::Parser;
@@ -24,6 +24,11 @@ pub struct ListArgs {
     /// By default, git status is run for each worktree.
     #[arg(long)]
     pub no_dirty_check: bool,
+
+    /// Only show worktrees whose branch is merged into BASE.
+    /// Defaults to the current branch when BASE is omitted.
+    #[arg(long, num_args(0..=1), default_missing_value = "HEAD", value_name = "BASE")]
+    pub merged: Option<String>,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -96,10 +101,22 @@ pub fn execute(args: ListArgs) -> Result<()> {
         args.format
     };
 
+    // Resolve --merged base: "HEAD" sentinel means current branch
+    let merged_base = args
+        .merged
+        .map(|base| {
+            if base == "HEAD" {
+                get_current_branch()
+            } else {
+                Ok(base)
+            }
+        })
+        .transpose()?;
+
     // Get worktrees with metadata; show a spinner during per-worktree git status calls.
     // Skipped only when --no-dirty-check is passed.
     let check_dirty = !args.no_dirty_check;
-    let worktrees = if check_dirty {
+    let mut worktrees = if check_dirty {
         with_spinner(
             "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
             || get_worktrees_with_metadata(true),
@@ -108,11 +125,21 @@ pub fn execute(args: ListArgs) -> Result<()> {
         get_worktrees_with_metadata(false)?
     };
 
+    // Apply --merged filter if requested
+    if let Some(ref base) = merged_base {
+        let merged_branches = operations::list_merged_branches(base)?;
+        worktrees.retain(|w| merged_branches.contains(&w.branch));
+    }
+
     // Check if there are any worktrees
     if worktrees.is_empty() {
+        let msg = match &merged_base {
+            Some(base) => format!("No merged worktrees found for '{}'.", base),
+            None => "No worktrees found.".to_string(),
+        };
         match format {
             OutputFormat::Json => println!("[]"),
-            _ => println!("No worktrees found."),
+            _ => println!("{}", msg),
         }
         return Ok(());
     }
