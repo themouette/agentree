@@ -60,14 +60,15 @@ pub fn execute(args: CdArgs) -> Result<()> {
             // in the main repo, which git forbids from being in two places at once).
             let main_repo_path =
                 get_git_common_dir()?.and_then(|d| d.parent().map(|p| p.to_path_buf()));
+            let main_repo_canonical = main_repo_path.as_ref().and_then(|p| p.canonicalize().ok());
             let result_canonical = result.path().canonicalize().ok();
-            let resolved_to_main_repo = match (&result_canonical, &main_repo_path) {
+            let resolved_to_main_repo = match (&result_canonical, &main_repo_canonical) {
                 (Some(rp), Some(mp)) => rp == mp,
                 _ => false,
             };
 
             if resolved_to_main_repo {
-                let main_display = main_repo_path
+                let main_display = main_repo_canonical
                     .as_ref()
                     .map(|p| p.display().to_string())
                     .unwrap_or_else(|| result.path().display().to_string());
