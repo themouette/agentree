@@ -135,8 +135,8 @@ pub fn execute(args: ListArgs) -> Result<()> {
     // Apply cheap filters first (no dirty check needed)
     args.filters.apply(&mut worktrees)?;
 
-    // Run dirty check when: not explicitly disabled, OR --dirty filter is active (forces it).
-    let need_dirty_check = !args.no_dirty_check || args.filters.requires_dirty_check();
+    // Run dirty check when not explicitly disabled.
+    let need_dirty_check = !args.no_dirty_check;
     if need_dirty_check {
         with_spinner(
             "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
