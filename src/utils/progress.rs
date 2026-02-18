@@ -1,14 +1,20 @@
+use crate::error::Result;
+use crate::worktree::config::WorktreeConfig;
+use crate::worktree::operations::{
+    detect_branch_status, ensure_workspace, BranchStatus, CreateResult,
+};
 use indicatif::{ProgressBar, ProgressStyle};
+use std::path::Path;
 use std::time::Duration;
 
 /// Run a closure while displaying an animated spinner on stderr.
 ///
 /// The spinner is only shown when stderr is a TTY. In non-interactive
-/// environments (CI, scripts, piped output) the message is printed as a
-/// plain line instead so output is still informative.
+/// environments (CI, scripts, piped output) the spinner is hidden so
+/// existing tooling is unaffected.
 ///
-/// On success the spinner is replaced by a `✓` line. On error the spinner
-/// is cleared and the error propagates to the caller.
+/// On completion the spinner is cleared regardless of outcome; errors
+/// propagate normally to the caller.
 ///
 /// # Example
 ///
@@ -17,9 +23,9 @@ use std::time::Duration;
 ///     create_worktree(&config, &root, "feat", None)
 /// })?;
 /// ```
-pub fn with_spinner<F, T, E>(message: &str, f: F) -> Result<T, E>
+pub fn with_spinner<F, T, E>(message: &str, f: F) -> std::result::Result<T, E>
 where
-    F: FnOnce() -> Result<T, E>,
+    F: FnOnce() -> std::result::Result<T, E>,
 {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
@@ -34,4 +40,35 @@ where
 
     pb.finish_and_clear();
     result
+}
+
+/// Ensure a workspace exists, showing an intent spinner before the git operation.
+///
+/// Detects whether the branch needs to be created or just checked out, shows an
+/// appropriate spinner message, then delegates to [`ensure_workspace`].
+///
+/// - Branch does not exist → `⠙ Creating branch '<name>' and worktree...`
+/// - Branch exists, no worktree → `⠙ Creating worktree for '<name>'...`
+/// - Worktree already exists → no spinner (instant resume)
+///
+/// The spinner is suppressed automatically in non-TTY environments.
+pub fn ensure_workspace_with_progress(
+    config: &WorktreeConfig,
+    repo_root: &Path,
+    branch: &str,
+    base: Option<&str>,
+) -> Result<CreateResult> {
+    let status = detect_branch_status(branch)?;
+
+    match status {
+        BranchStatus::InWorktree(_) => ensure_workspace(config, repo_root, branch, base),
+        BranchStatus::ExistsNotCheckedOut => {
+            let msg = format!("Creating worktree for '{}'...", branch);
+            with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))
+        }
+        BranchStatus::DoesNotExist => {
+            let msg = format!("Creating branch '{}' and worktree...", branch);
+            with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))
+        }
+    }
 }

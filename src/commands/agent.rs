@@ -23,6 +23,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         args.workspace.backend.as_deref(),
         args.workspace.worktree_location.as_deref(),
         args.agent.as_deref(),
+        None,
     )?;
 
     // Determine which backend we're using
