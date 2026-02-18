@@ -428,23 +428,51 @@ fn test_cd_prints_path() {
 }
 
 #[test]
-fn test_cd_nonexistent_branch() {
+fn test_cd_autocreates_worktree() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
     test_repo.commit("Initial commit");
 
-    // Try cd to nonexistent branch
-    let output = test_repo.agentree(&["cd", "nonexistent-branch"]);
+    // cd to a branch that does not exist yet — should auto-create the worktree
+    let output = test_repo.agentree(&["cd", "new-branch"]);
     assert!(
-        !output.status.success(),
-        "cd should fail for nonexistent branch"
+        output.status.success(),
+        "cd should succeed by creating the worktree: {}",
+        String::from_utf8_lossy(&output.stderr)
     );
 
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stderr.contains("No worktree found") || stderr.contains("nonexistent-branch"),
-        "Error should mention worktree not found or branch name: {}",
-        stderr
+        stdout.starts_with("cd '"),
+        "Output should be a cd command: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("new-branch"),
+        "Output should reference the branch name: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_cd_autocreates_with_base() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // cd with an explicit base branch
+    let output = test_repo.agentree(&["cd", "based-branch", "-b", "main"]);
+    assert!(
+        output.status.success(),
+        "cd with base should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("based-branch"),
+        "Output should reference the new branch: {}",
+        stdout
     );
 }
 

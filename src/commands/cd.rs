@@ -1,50 +1,49 @@
-use crate::error::{AgentreeError, Result};
-use crate::utils::git::get_git_root;
-use crate::worktree::{recovery, validation};
+use crate::commands::common::{WorkspaceArgs, WorkspaceContext};
+use crate::error::Result;
+use crate::utils::progress::ensure_workspace_with_progress;
+use crate::worktree::metadata::WorktreeMetadata;
 use clap::Parser;
 
 #[derive(Parser, Debug)]
 pub struct CdArgs {
-    /// Branch name to navigate to
-    pub branch: String,
+    #[command(flatten)]
+    pub workspace: WorkspaceArgs,
 }
 
 pub fn execute(args: CdArgs) -> Result<()> {
-    // Check git version
-    validation::check_git_version()?;
+    let ctx = WorkspaceContext::init(
+        args.workspace.backend.as_deref(),
+        args.workspace.worktree_location.as_deref(),
+        None,
+        None,
+    )?;
 
-    // Get repo root (verify we're in a git repository)
-    let _repo_root =
-        get_git_root()?.ok_or_else(|| AgentreeError::Git("Not in a git repository".to_string()))?;
+    let branch = &args.workspace.branch;
+    let base = args.workspace.base.as_deref();
 
-    // Get worktrees with cleanup
-    let worktrees = recovery::ensure_clean_state()?;
+    let result =
+        ensure_workspace_with_progress(&ctx.config.worktree, &ctx.repo_root, branch, base)?;
 
-    // Find worktree matching the branch
-    let worktree = worktrees
-        .iter()
-        .find(|e| e.branch.as_deref() == Some(&args.branch))
-        .ok_or_else(|| AgentreeError::WorktreeNotFound {
-            branch: args.branch.clone(),
-        })?;
+    if result.was_created() {
+        let metadata = WorktreeMetadata::new(ctx.config.effective_backend().to_string());
+        metadata.save(result.path())?;
+        // Inform the user something was created; skip this on plain resume to
+        // keep navigation noise-free.
+        eprintln!("{}", result.message(branch));
+    }
 
-    // Print cd command to stdout (for shell eval)
-    // Use shell_escape to safely escape the path
-    let path_str = worktree.path.to_string_lossy();
-    println!("cd {}", shell_escape(&path_str));
+    // Print cd command to stdout for shell eval
+    println!("cd {}", shell_escape(&result.path().to_string_lossy()));
 
     Ok(())
 }
 
-/// Escape a string for safe use in shell commands
-/// Uses single quotes and escapes any embedded single quotes
+/// Escape a string for safe use in shell commands.
+/// Uses single quotes and handles embedded single quotes.
 fn shell_escape(s: &str) -> String {
-    // If the string is empty, return empty quotes
     if s.is_empty() {
         return "''".to_string();
     }
-
-    // Replace single quotes with '\'' (end quote, escaped quote, start quote)
     let escaped = s.replace('\'', "'\\''");
     format!("'{}'", escaped)
 }
