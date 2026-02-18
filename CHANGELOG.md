@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Creating a branch from a remote tracking ref (e.g. `agentree create my-branch -b origin/preprod`)
+  no longer silently sets the new branch's upstream to the remote branch. `--no-track` is now
+  passed to `git worktree add` so the new branch is always free-standing, and `git push` behaves
+  as expected.  
 - Significant performance regression introduced in 0.5.0: `git worktree repair` was
   being run before every command (list, cd, remove, create, etc.) via `ensure_clean_state()`.
   `git worktree repair` is a filesystem-intensive operation and caused noticeable slowdowns
