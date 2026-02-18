@@ -1,6 +1,7 @@
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::{get_git_root, path_to_str, run_git_query};
+use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use clap::Parser;
 use serde::Serialize;
@@ -94,8 +95,14 @@ pub fn execute(args: ListArgs) -> Result<()> {
         args.format
     };
 
-    // Get worktrees with metadata
-    let worktrees = get_worktrees_with_metadata(args.dirty)?;
+    // Get worktrees with metadata; show a spinner when --dirty triggers per-worktree git calls
+    let worktrees = if args.dirty {
+        with_spinner("Checking for uncommitted changes...", || {
+            get_worktrees_with_metadata(true)
+        })?
+    } else {
+        get_worktrees_with_metadata(false)?
+    };
 
     // Check if there are any worktrees
     if worktrees.is_empty() {
