@@ -1992,6 +1992,63 @@ fn test_remove_dirty_filter_removes_dirty_worktrees() {
     );
 }
 
+// ─── --stale filter ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_stale_zero_days_shows_all() {
+    // --stale 0 means "not modified in the last 0 days" = everything qualifies
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "some-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "0", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --stale 0 should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("some-branch"),
+        "Should show some-branch with --stale 0: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_stale_large_threshold_shows_nothing() {
+    // --stale 99999 means "not modified in 99999 days" = nothing matches a freshly created worktree
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "fresh-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "99999", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --stale 99999 should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("fresh-branch"),
+        "fresh-branch should not appear with very large threshold: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_stale_default_value() {
+    // --stale without a value should default to 30 days (no error, just runs)
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "any-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --stale (no value) should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 // ─── --branch pattern filter ─────────────────────────────────────────────────
 
 #[test]

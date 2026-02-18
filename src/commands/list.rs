@@ -171,6 +171,16 @@ fn apply_list_filters(
     if let Some(ref pattern) = filters.branch_pattern {
         worktrees.retain(|w| glob_match(pattern, &w.branch));
     }
+    // --stale filter: keep only worktrees not modified within the last N days
+    if let Some(days) = filters.stale_days {
+        let threshold = std::time::Duration::from_secs(u64::from(days) * 86_400);
+        worktrees.retain(|w| {
+            w.modified
+                .and_then(|t| t.elapsed().ok())
+                .map(|elapsed| elapsed >= threshold)
+                .unwrap_or(false)
+        });
+    }
     Ok(())
 }
 

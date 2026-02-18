@@ -17,7 +17,8 @@ pub struct RemoveArgs {
         "not_merged",
         "only_locked",
         "only_dirty",
-        "branch_pattern"
+        "branch_pattern",
+        "stale_days"
     ])]
     pub branches: Vec<String>,
 
@@ -162,6 +163,16 @@ fn apply_entry_filters(
             e.branch
                 .as_deref()
                 .map(|b| glob_match(pattern, b))
+                .unwrap_or(false)
+        });
+    }
+    // --stale: keep only worktrees not modified within the last N days
+    if let Some(days) = filters.stale_days {
+        let threshold = std::time::Duration::from_secs(u64::from(days) * 86_400);
+        entries.retain(|e| {
+            operations::get_last_activity(&e.path)
+                .and_then(|t| t.elapsed().ok())
+                .map(|elapsed| elapsed >= threshold)
                 .unwrap_or(false)
         });
     }

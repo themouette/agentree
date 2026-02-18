@@ -43,6 +43,12 @@ pub struct WorktreeFilterArgs {
     /// Example: --branch "feature/*"
     #[arg(long = "branch", value_name = "PATTERN")]
     pub branch_pattern: Option<String>,
+
+    /// Only include worktrees not modified within the last N days.
+    /// Defaults to 30 days when the flag is given without a value.
+    /// Example: --stale 7 (show worktrees idle for 7+ days)
+    #[arg(long = "stale", num_args(0..=1), default_missing_value = "30", value_name = "DAYS")]
+    pub stale_days: Option<u32>,
 }
 
 impl WorktreeFilterArgs {
@@ -53,6 +59,7 @@ impl WorktreeFilterArgs {
             || self.only_locked
             || self.only_dirty
             || self.branch_pattern.is_some()
+            || self.stale_days.is_some()
     }
 
     /// Returns `true` if a dirty check is required by the active filters.
@@ -134,7 +141,7 @@ mod tests {
     fn test_glob_star_suffix() {
         assert!(glob_match("*-wip", "feature-wip"));
         assert!(glob_match("*-wip", "my-long-name-wip"));
-        assert!(!glob_match("*-wip", "wip"));      // no "-wip" suffix
+        assert!(!glob_match("*-wip", "wip")); // no "-wip" suffix
         assert!(!glob_match("*-wip", "wip-done")); // suffix is "-done", not "-wip"
     }
 
