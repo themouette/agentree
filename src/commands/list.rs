@@ -1,6 +1,4 @@
-use crate::commands::filters::{
-    check_worktree_dirty, glob_match, resolve_head_sentinel, WorktreeFilterArgs,
-};
+use crate::commands::filters::{check_worktree_dirty, WorktreeFilterArgs, WorktreeFilterable};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -81,6 +79,21 @@ struct WorktreeInfo {
     locked: Option<String>,
 }
 
+impl WorktreeFilterable for WorktreeInfo {
+    fn branch(&self) -> Option<&str> {
+        Some(&self.branch)
+    }
+    fn locked(&self) -> Option<&str> {
+        self.locked.as_deref()
+    }
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn modified(&self) -> Option<std::time::SystemTime> {
+        self.modified
+    }
+}
+
 pub fn execute(args: ListArgs) -> Result<()> {
     // Check git version
     validation::check_git_version()?;
@@ -120,7 +133,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
     }
 
     // Apply cheap filters first (no dirty check needed)
-    apply_list_filters(&mut worktrees, &args.filters)?;
+    args.filters.apply(&mut worktrees)?;
 
     // Run dirty check when: not explicitly disabled, OR --dirty filter is active (forces it).
     let need_dirty_check = !args.no_dirty_check || args.filters.requires_dirty_check();
@@ -156,47 +169,6 @@ pub fn execute(args: ListArgs) -> Result<()> {
         OutputFormat::Card => render_card(&worktrees),
         OutputFormat::Json => render_json(&worktrees),
     }
-}
-
-/// Apply all non-dirty filters to the worktree list (no git calls beyond merged/not-merged check).
-fn apply_list_filters(
-    worktrees: &mut Vec<WorktreeInfo>,
-    filters: &WorktreeFilterArgs,
-) -> Result<()> {
-    // --merged filter: keep only worktrees whose branch is merged into BASE
-    if let Some(ref base) = filters.merged {
-        let base = resolve_head_sentinel(base)?;
-        let merged_branches = operations::list_merged_branches(&base)?;
-        worktrees.retain(|w| merged_branches.contains(&w.branch));
-    }
-    // --not-merged filter: keep only worktrees whose branch is NOT merged into BASE
-    if let Some(ref base) = filters.not_merged {
-        let base = resolve_head_sentinel(base)?;
-        let merged_branches = operations::list_merged_branches(&base)?;
-        worktrees.retain(|w| !merged_branches.contains(&w.branch));
-    }
-    // --locked / --not-locked filter
-    if filters.only_locked {
-        worktrees.retain(|w| w.locked.is_some());
-    }
-    if filters.not_locked {
-        worktrees.retain(|w| w.locked.is_none());
-    }
-    // --branch filter: keep only branches matching PATTERN
-    if let Some(ref pattern) = filters.branch_pattern {
-        worktrees.retain(|w| glob_match(pattern, &w.branch));
-    }
-    // --stale filter: keep only worktrees not modified within the last N days
-    if let Some(days) = filters.stale_days {
-        let threshold = std::time::Duration::from_secs(u64::from(days) * 86_400);
-        worktrees.retain(|w| {
-            w.modified
-                .and_then(|t| t.elapsed().ok())
-                .map(|elapsed| elapsed >= threshold)
-                .unwrap_or(false)
-        });
-    }
-    Ok(())
 }
 
 /// Build the "no results" message based on which filters are active.

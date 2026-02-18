@@ -1,5 +1,6 @@
 use crate::error::Result;
 use crate::utils::git::{get_current_branch, path_to_str, run_git_query};
+use crate::worktree::{operations, state::WorktreeEntry};
 use clap::Parser;
 
 /// Shared worktree filter flags used by `list` and `remove`.
@@ -60,7 +61,75 @@ pub struct WorktreeFilterArgs {
     pub stale_days: Option<u32>,
 }
 
+/// Trait for types that can be filtered by `WorktreeFilterArgs`.
+/// Implement this for any type that represents a worktree entry.
+pub trait WorktreeFilterable {
+    fn branch(&self) -> Option<&str>;
+    fn locked(&self) -> Option<&str>;
+    fn path(&self) -> &std::path::Path;
+    fn modified(&self) -> Option<std::time::SystemTime>;
+}
+
+impl WorktreeFilterable for WorktreeEntry {
+    fn branch(&self) -> Option<&str> {
+        self.branch.as_deref()
+    }
+    fn locked(&self) -> Option<&str> {
+        self.locked.as_deref()
+    }
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn modified(&self) -> Option<std::time::SystemTime> {
+        operations::get_last_activity(&self.path)
+    }
+}
+
 impl WorktreeFilterArgs {
+    /// Apply all non-dirty filters in place.
+    ///
+    /// Dirty/clean filtering is excluded because it requires command-specific
+    /// two-phase handling (check then filter).
+    pub fn apply<T: WorktreeFilterable>(&self, items: &mut Vec<T>) -> Result<()> {
+        if let Some(ref base) = self.merged {
+            let base = resolve_head_sentinel(base)?;
+            let merged = operations::list_merged_branches(&base)?;
+            items.retain(|e| {
+                e.branch()
+                    .map(|b| merged.contains(&b.to_string()))
+                    .unwrap_or(false)
+            });
+        }
+        if let Some(ref base) = self.not_merged {
+            let base = resolve_head_sentinel(base)?;
+            let merged = operations::list_merged_branches(&base)?;
+            items.retain(|e| {
+                e.branch()
+                    .map(|b| !merged.contains(&b.to_string()))
+                    .unwrap_or(false)
+            });
+        }
+        if self.only_locked {
+            items.retain(|e| e.locked().is_some());
+        }
+        if self.not_locked {
+            items.retain(|e| e.locked().is_none());
+        }
+        if let Some(ref pat) = self.branch_pattern {
+            items.retain(|e| e.branch().map(|b| glob_match(pat, b)).unwrap_or(false));
+        }
+        if let Some(days) = self.stale_days {
+            let threshold = std::time::Duration::from_secs(u64::from(days) * 86_400);
+            items.retain(|e| {
+                e.modified()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| d >= threshold)
+                    .unwrap_or(false)
+            });
+        }
+        Ok(())
+    }
+
     /// Returns `true` if any filter flag is set.
     pub fn has_any(&self) -> bool {
         self.merged.is_some()

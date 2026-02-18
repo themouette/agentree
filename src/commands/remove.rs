@@ -1,7 +1,5 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
-use crate::commands::filters::{
-    check_worktree_dirty, glob_match, resolve_head_sentinel, WorktreeFilterArgs,
-};
+use crate::commands::filters::{check_worktree_dirty, WorktreeFilterArgs};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -126,66 +124,6 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
     Ok(())
 }
 
-/// Apply filter flags to a list of worktree entries, retaining only those that match.
-///
-/// Filters are applied cheapest-first (in-memory checks before additional git calls).
-/// The dirty filter is handled separately in `remove_by_filters` because it requires
-/// per-worktree git calls.
-fn apply_entry_filters(
-    entries: &mut Vec<crate::worktree::state::WorktreeEntry>,
-    filters: &WorktreeFilterArgs,
-) -> Result<()> {
-    // --merged: keep only branches merged into BASE
-    if let Some(ref base) = filters.merged {
-        let base = resolve_head_sentinel(base)?;
-        let merged_branches = operations::list_merged_branches(&base)?;
-        entries.retain(|e| {
-            e.branch
-                .as_deref()
-                .map(|b| merged_branches.contains(&b.to_string()))
-                .unwrap_or(false)
-        });
-    }
-    // --not-merged: keep only branches NOT merged into BASE
-    if let Some(ref base) = filters.not_merged {
-        let base = resolve_head_sentinel(base)?;
-        let merged_branches = operations::list_merged_branches(&base)?;
-        entries.retain(|e| {
-            e.branch
-                .as_deref()
-                .map(|b| !merged_branches.contains(&b.to_string()))
-                .unwrap_or(false)
-        });
-    }
-    // --locked / --not-locked: filter by lock status
-    if filters.only_locked {
-        entries.retain(|e| e.locked.is_some());
-    }
-    if filters.not_locked {
-        entries.retain(|e| e.locked.is_none());
-    }
-    // --branch: keep only branches matching PATTERN
-    if let Some(ref pattern) = filters.branch_pattern {
-        entries.retain(|e| {
-            e.branch
-                .as_deref()
-                .map(|b| glob_match(pattern, b))
-                .unwrap_or(false)
-        });
-    }
-    // --stale: keep only worktrees not modified within the last N days
-    if let Some(days) = filters.stale_days {
-        let threshold = std::time::Duration::from_secs(u64::from(days) * 86_400);
-        entries.retain(|e| {
-            operations::get_last_activity(&e.path)
-                .and_then(|t| t.elapsed().ok())
-                .map(|elapsed| elapsed >= threshold)
-                .unwrap_or(false)
-        });
-    }
-    Ok(())
-}
-
 /// Select worktrees via filter flags and remove them.
 fn remove_by_filters(
     filters: &WorktreeFilterArgs,
@@ -195,7 +133,7 @@ fn remove_by_filters(
 ) -> Result<()> {
     let mut candidates = recovery::list_linked_worktrees()?;
 
-    apply_entry_filters(&mut candidates, filters)?;
+    filters.apply(&mut candidates)?;
 
     // --dirty / --clean filter: retain by uncommitted-changes status.
     if filters.only_dirty || filters.only_clean {
