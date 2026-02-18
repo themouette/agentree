@@ -2429,3 +2429,39 @@ fn test_remove_not_merged_removes_only_unmerged() {
         stdout
     );
 }
+
+#[test]
+fn test_remove_not_locked_filter_removes_unlocked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "unlocked-wt"]);
+    test_repo.agentree(&["create", "locked-wt"]);
+
+    // Lock one worktree
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo.worktrees_dir().join(repo_name).join("locked-wt");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    // remove --not-locked should remove only the unlocked worktree
+    let output = test_repo.agentree(&["remove", "--not-locked"]);
+    assert!(
+        output.status.success(),
+        "remove --not-locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        !stdout.contains("unlocked-wt"),
+        "unlocked-wt should have been removed: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("locked-wt"),
+        "locked-wt should still be present: {}",
+        stdout
+    );
+}
