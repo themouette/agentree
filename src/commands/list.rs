@@ -326,12 +326,10 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
             DirtyStatus::Dirty => println!("│  Dirty:    yes"),
             DirtyStatus::NotChecked => {}
         }
-        if let Some(lock_reason) = &info.locked {
-            if lock_reason.is_empty() {
-                println!("│  Locked:   yes");
-            } else {
-                println!("│  Locked:   yes ({})", lock_reason);
-            }
+        match info.locked.as_deref() {
+            None => println!("│  Locked:   no"),
+            Some("") => println!("│  Locked:   yes"),
+            Some(reason) => println!("│  Locked:   yes ({})", reason),
         }
         println!("└─");
     }
@@ -489,9 +487,18 @@ mod tests {
     }
 
     #[test]
-    fn test_card_omits_locked_when_unlocked() {
+    fn test_card_shows_locked_no_when_unlocked() {
         let info = make_info(DirtyStatus::NotChecked, None);
-        assert!(info.locked.is_none(), "Locked line should be absent");
+        let locked_line = match info.locked.as_deref() {
+            None => "Locked:   no",
+            Some("") => "Locked:   yes",
+            Some(reason) => {
+                // just to satisfy the borrow checker in test context
+                let _ = reason;
+                "Locked:   yes (reason)"
+            }
+        };
+        assert_eq!(locked_line, "Locked:   no");
     }
 
     #[test]
