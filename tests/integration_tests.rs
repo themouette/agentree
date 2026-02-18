@@ -1896,6 +1896,102 @@ fn test_doctor_json_with_issues() {
     assert!(first_issue.get("fix").is_some(), "Issue should have fix");
 }
 
+// ─── --dirty filter ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_dirty_filter_shows_only_dirty_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "clean-branch"]);
+    test_repo.agentree(&["create", "dirty-filter-branch"]);
+
+    // Make uncommitted changes in dirty-filter-branch
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dirty-filter-branch");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["list", "--dirty"]);
+    assert!(
+        output.status.success(),
+        "list --dirty should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("dirty-filter-branch"),
+        "Should show dirty-filter-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("clean-branch"),
+        "Should not show clean-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_dirty_conflicts_with_no_dirty_check() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["list", "--dirty", "--no-dirty-check"]);
+    assert!(
+        !output.status.success(),
+        "Combining --dirty and --no-dirty-check should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--no-dirty-check") || stderr.contains("--dirty"),
+        "Should mention conflicting flags: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_remove_dirty_filter_removes_dirty_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "will-keep"]);
+    test_repo.agentree(&["create", "will-remove-dirty"]);
+
+    // Make uncommitted changes only in will-remove-dirty
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("will-remove-dirty");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    // remove --dirty should remove dirty worktrees (auto force)
+    let output = test_repo.agentree(&["remove", "--dirty"]);
+    assert!(
+        output.status.success(),
+        "remove --dirty should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("will-keep"),
+        "will-keep should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("will-remove-dirty"),
+        "will-remove-dirty should have been removed: {}",
+        stdout
+    );
+}
+
 // ─── --locked filter ─────────────────────────────────────────────────────────
 
 #[test]

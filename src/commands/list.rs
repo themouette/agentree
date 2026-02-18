@@ -103,16 +103,28 @@ pub fn execute(args: ListArgs) -> Result<()> {
     // Fetch basic metadata (no dirty check yet — filter first to avoid wasted git calls)
     let mut worktrees = get_worktrees_with_metadata()?;
 
+    // --dirty filter conflicts with --no-dirty-check (check is required to filter by it)
+    if args.no_dirty_check && args.filters.only_dirty {
+        return Err(crate::error::AgentreeError::Worktree(
+            "--no-dirty-check cannot be combined with --dirty (dirty check is required to filter by it)".to_string(),
+        ));
+    }
+
     // Apply cheap filters first (no dirty check needed)
     apply_list_filters(&mut worktrees, &args.filters)?;
 
-    // Run dirty check on the filtered set; show a spinner during per-worktree git status calls.
-    // Skipped only when --no-dirty-check is passed.
-    if !args.no_dirty_check {
+    // Run dirty check when: not explicitly disabled, OR --dirty filter is active (forces it).
+    let need_dirty_check = !args.no_dirty_check || args.filters.requires_dirty_check();
+    if need_dirty_check {
         with_spinner(
             "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
             || populate_dirty_status(&mut worktrees),
         )?;
+    }
+
+    // Apply --dirty filter after the check
+    if args.filters.only_dirty {
+        worktrees.retain(|w| w.dirty == DirtyStatus::Dirty);
     }
 
     // Check if there are any worktrees

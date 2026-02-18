@@ -32,12 +32,22 @@ pub struct WorktreeFilterArgs {
     /// Only include locked worktrees.
     #[arg(long = "locked")]
     pub only_locked: bool,
+
+    /// Only include worktrees with uncommitted changes (implies dirty check).
+    /// Conflicts with --no-dirty-check when used with `list`.
+    #[arg(long = "dirty")]
+    pub only_dirty: bool,
 }
 
 impl WorktreeFilterArgs {
     /// Returns `true` if any filter flag is set.
     pub fn has_any(&self) -> bool {
-        self.merged.is_some() || self.not_merged.is_some() || self.only_locked
+        self.merged.is_some() || self.not_merged.is_some() || self.only_locked || self.only_dirty
+    }
+
+    /// Returns `true` if a dirty check is required by the active filters.
+    pub fn requires_dirty_check(&self) -> bool {
+        self.only_dirty
     }
 }
 

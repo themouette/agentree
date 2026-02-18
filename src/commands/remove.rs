@@ -12,7 +12,7 @@ use clap::Parser;
 pub struct RemoveArgs {
     /// Branch names to remove (can specify multiple).
     /// Mutually exclusive with filter flags (--merged, --not-merged, etc.).
-    #[arg(required_unless_present_any = ["merged", "not_merged", "only_locked"])]
+    #[arg(required_unless_present_any = ["merged", "not_merged", "only_locked", "only_dirty"])]
     pub branches: Vec<String>,
 
     /// Force removal even with uncommitted changes or locked status
@@ -153,6 +153,21 @@ fn apply_entry_filters(
     Ok(())
 }
 
+/// Returns `true` when the worktree at `path` has uncommitted changes.
+/// Best-effort: returns `false` on error (missing path, git failure, etc.).
+fn is_worktree_dirty(path: &std::path::Path) -> bool {
+    use crate::utils::git::{path_to_str, run_git_query};
+    path_to_str(path, "worktree path")
+        .ok()
+        .and_then(|p| {
+            run_git_query(&["-C", p, "status", "--short"])
+                .ok()
+                .flatten()
+        })
+        .map(|output| !output.is_empty())
+        .unwrap_or(false)
+}
+
 /// Select worktrees via filter flags and remove them.
 fn remove_by_filters(
     filters: &WorktreeFilterArgs,
@@ -163,6 +178,12 @@ fn remove_by_filters(
     let mut candidates = recovery::list_linked_worktrees()?;
 
     apply_entry_filters(&mut candidates, filters)?;
+
+    // --dirty filter: keep only worktrees with uncommitted changes.
+    // Auto-imply IgnoreDirty force level so git allows the removal.
+    if filters.only_dirty {
+        candidates.retain(|e| is_worktree_dirty(&e.path));
+    }
 
     if candidates.is_empty() {
         let msg = if let Some(ref base) = filters.merged {
@@ -176,7 +197,12 @@ fn remove_by_filters(
         return Ok(());
     }
 
-    let force_level = ForceLevel::from_count(force);
+    // --dirty filter implies at least IgnoreDirty so git can remove the worktree
+    let force_level = if filters.only_dirty && ForceLevel::from_count(force) == ForceLevel::None {
+        ForceLevel::IgnoreDirty
+    } else {
+        ForceLevel::from_count(force)
+    };
     // --locked filter implies automatic unlock so git can remove the worktree
     let effective_unlock = unlock || filters.only_locked;
     let mut removed = 0;
