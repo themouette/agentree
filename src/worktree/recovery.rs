@@ -69,8 +69,8 @@ pub fn try_repair() -> Result<()> {
     Ok(())
 }
 
-/// Ensure clean state by checking for stale metadata and querying worktrees
-/// This is the main entry point Phase 2 will call before operations
+/// Check for stale worktree metadata, then list all worktrees.
+/// Logs a warning if stale metadata is detected; does not attempt repair.
 pub fn ensure_clean_state() -> Result<Vec<WorktreeEntry>> {
     check_stale_metadata()?;
     list_worktrees()
