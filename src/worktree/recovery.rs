@@ -1,12 +1,12 @@
 use crate::error::Result;
 use crate::utils::git::run_git_best_effort;
 use crate::worktree::state::{list_worktrees, WorktreeEntry};
-use std::io::{self, Write};
 
-/// Auto-prune orphaned worktree metadata with user confirmation
+/// Check for stale worktree metadata and warn the user if any is found.
+/// Suggests running `agentree doctor --fix` to resolve issues.
 /// Best-effort operation - logs warnings on failure but doesn't error
-pub fn auto_prune() -> Result<()> {
-    // First, do a dry-run to see what would be pruned
+pub fn check_stale_metadata() -> Result<()> {
+    // Do a dry-run to see what would be pruned
     let to_prune = match run_git_best_effort(&["worktree", "prune", "--dry-run", "--verbose"]) {
         Ok(output) => String::from_utf8_lossy(&output.stderr).to_string(),
         Err(e) => {
@@ -15,35 +15,22 @@ pub fn auto_prune() -> Result<()> {
         }
     };
 
-    // Only prompt if there's something to prune
+    // If there's something to prune, suggest running doctor instead of prompting
     if !to_prune.trim().is_empty() {
-        eprintln!("Found orphaned worktree metadata:");
-        eprintln!("{}", to_prune);
+        eprintln!("Warning: stale worktree metadata detected.");
+        eprintln!("Run `agentree doctor --fix` to diagnose and clean up.");
         eprintln!();
-
-        // Prompt for confirmation
-        print!("Prune orphaned worktrees? [y/N] ");
-        let _ = io::stdout().flush();
-
-        let mut input = String::new();
-        if let Err(e) = io::stdin().read_line(&mut input) {
-            eprintln!("Warning: failed to read input: {}", e);
-            eprintln!("Skipped pruning worktrees.");
-            return Ok(());
-        }
-        let input = input.trim().to_lowercase();
-
-        // If user doesn't confirm, skip prune
-        if input != "y" && input != "yes" {
-            eprintln!("Skipped pruning worktrees.");
-            return Ok(());
-        }
     }
 
-    // Actually prune
+    // Always return Ok - prune check is informational, not critical
+    Ok(())
+}
+
+/// Prune stale worktree metadata unconditionally
+/// Best-effort operation - logs warnings on failure but doesn't error
+pub fn prune() -> Result<()> {
     match run_git_best_effort(&["worktree", "prune"]) {
         Ok(output) if !output.status.success() => {
-            // Log warning but don't fail - prune is best-effort cleanup
             eprintln!(
                 "Warning: git worktree prune failed: {}",
                 String::from_utf8_lossy(&output.stderr)
@@ -52,12 +39,7 @@ pub fn auto_prune() -> Result<()> {
         Err(e) => {
             eprintln!("Warning: failed to run git worktree prune: {}", e);
         }
-        _ => {
-            // Success - optionally show success message if something was pruned
-            if !to_prune.trim().is_empty() {
-                eprintln!("Pruned orphaned worktrees.");
-            }
-        }
+        _ => {}
     }
 
     // Always return Ok - prune is cleanup, not critical
@@ -87,11 +69,10 @@ pub fn try_repair() -> Result<()> {
     Ok(())
 }
 
-/// Ensure clean state by running repair, auto-prune, and querying worktrees
+/// Ensure clean state by checking for stale metadata and querying worktrees
 /// This is the main entry point Phase 2 will call before operations
 pub fn ensure_clean_state() -> Result<Vec<WorktreeEntry>> {
-    try_repair()?;
-    auto_prune()?;
+    check_stale_metadata()?;
     list_worktrees()
 }
 
@@ -103,7 +84,7 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn test_auto_prune_does_not_error() {
+    fn test_check_stale_metadata_does_not_error() {
         // Create a temporary git repo for testing
         let dir = TempDir::new().unwrap();
         let repo_path = dir.path();
@@ -131,8 +112,8 @@ mod tests {
         // Change to repo directory for git commands
         std::env::set_current_dir(repo_path).unwrap();
 
-        // Run auto_prune - should not error even if nothing to prune
-        let result = auto_prune();
+        // Should not error even if nothing is stale
+        let result = check_stale_metadata();
         assert!(result.is_ok());
     }
 
