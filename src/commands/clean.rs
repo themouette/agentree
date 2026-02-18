@@ -19,9 +19,9 @@ pub fn execute(_args: CleanArgs) -> Result<()> {
         )
     })?;
 
-    // Run full cleanup
-    recovery::auto_prune()?;
+    // Run full cleanup: repair broken links first, then prune stale metadata
     recovery::try_repair()?;
+    recovery::prune()?;
 
     println!("Cleanup complete.");
 

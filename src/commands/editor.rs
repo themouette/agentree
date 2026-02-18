@@ -63,16 +63,11 @@ pub fn execute(args: EditorArgs) -> Result<()> {
     )?;
 
     // Save metadata only for newly created workspaces
-    if let operations::CreateResult::Created(_) = result {
+    if result.was_created() {
         let metadata = WorktreeMetadata::new(config.effective_backend().to_string());
         metadata.save(result.path())?;
-
-        eprintln!(
-            "Created worktree for branch '{}' at {}",
-            args.branch,
-            result.path().display()
-        );
     }
+    eprintln!("{}", result.message(&args.branch));
 
     // Validate workspace path is accessible
     let workspace_path = result.path();
