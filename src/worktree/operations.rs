@@ -292,7 +292,10 @@ pub fn create_worktree(
             remove_orphaned_directory(&worktree_path)?;
 
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
-            let mut args = vec!["worktree", "add", "-b", branch, path_str];
+            // --no-track prevents git from setting the new branch's upstream to the
+            // base ref (which happens automatically when base is a remote tracking branch
+            // like origin/preprod, causing confusing push behaviour)
+            let mut args = vec!["worktree", "add", "--no-track", "-b", branch, path_str];
             if let Some(base_branch) = base {
                 args.push(base_branch);
             }
