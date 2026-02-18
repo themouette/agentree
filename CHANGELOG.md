@@ -39,6 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `agentree cd <branch>` now warns on stderr when the requested branch is
+  checked out in the main repository rather than in a dedicated worktree (git
+  forbids the same branch from being checked out in two places). Two variants:
+  - **Navigating from elsewhere**: warns that the branch lives in the main repo,
+    shows the destination path, and suggests switching the main repo to another
+    branch first if an isolated worktree is needed.
+  - **Already in the main repo**: warns that you're already on that branch in
+    the main repo, and suggests using `agentree cd` (no argument) to navigate
+    there intentionally. The `cd` command is still emitted in both cases so the
+    shell wrapper continues to work transparently.
 - `agentree cd` (no branch argument) now navigates to the main repository root,
   whether called from a worktree or from the main repo itself. This makes it easy
   to return to the main repo before deleting a worktree or switching contexts,

@@ -103,6 +103,18 @@ impl TestRepo {
             .expect("Failed to run agentree command")
     }
 
+    /// Run agentree command from an arbitrary directory (e.g. a worktree path)
+    pub fn agentree_from(&self, dir: &Path, args: &[&str]) -> Output {
+        let binary_path = self.get_agentree_binary();
+
+        Command::new(&binary_path)
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", &self.global_gitconfig)
+            .output()
+            .expect("Failed to run agentree command")
+    }
+
     /// Get path to the agentree binary
     fn get_agentree_binary(&self) -> PathBuf {
         // Always prefer the debug binary so tests run against the code under test,

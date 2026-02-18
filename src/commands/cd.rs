@@ -55,7 +55,53 @@ pub fn execute(args: CdArgs) -> Result<()> {
                 args.base.as_deref(),
             )?;
 
-            if result.was_created() {
+            // Detect if the branch resolved to the main repository rather than a
+            // dedicated worktree (happens when the branch is currently checked out
+            // in the main repo, which git forbids from being in two places at once).
+            let main_repo_path =
+                get_git_common_dir()?.and_then(|d| d.parent().map(|p| p.to_path_buf()));
+            let result_canonical = result.path().canonicalize().ok();
+            let resolved_to_main_repo = match (&result_canonical, &main_repo_path) {
+                (Some(rp), Some(mp)) => rp == mp,
+                _ => false,
+            };
+
+            if resolved_to_main_repo {
+                let main_display = main_repo_path
+                    .as_ref()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| result.path().display().to_string());
+
+                // Check if the caller is already sitting in the main repo.
+                let already_there = std::env::current_dir()
+                    .ok()
+                    .and_then(|cwd| cwd.canonicalize().ok())
+                    .zip(result_canonical)
+                    .map(|(cwd, rp)| cwd == rp)
+                    .unwrap_or(false);
+
+                if already_there {
+                    eprintln!(
+                        "Warning: '{}' is the current branch of the main repository — you're already here.",
+                        branch
+                    );
+                    eprintln!(
+                        "         Tip: Use 'agentree cd' (no argument) to navigate here intentionally."
+                    );
+                } else {
+                    eprintln!(
+                        "Warning: '{}' is checked out in the main repository, not in a separate worktree.",
+                        branch
+                    );
+                    eprintln!(
+                        "         Navigating to the main repository at {}.",
+                        main_display
+                    );
+                    eprintln!(
+                        "         Tip: Switch the main repo to another branch first if you want an isolated worktree."
+                    );
+                }
+            } else if result.was_created() {
                 let metadata = WorktreeMetadata::new(ctx.config.effective_backend().to_string());
                 metadata.save(result.path())?;
                 // Inform the user something was created; skip this on plain resume to

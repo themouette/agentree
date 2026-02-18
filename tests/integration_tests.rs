@@ -477,6 +477,76 @@ fn test_cd_autocreates_with_base() {
 }
 
 #[test]
+fn test_cd_warns_when_branch_checked_out_in_main_repo() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree on a separate branch so we have somewhere to "come from".
+    let wt_output = test_repo.agentree(&["create", "other-branch"]);
+    assert!(wt_output.status.success(), "create worktree should succeed");
+
+    // The main repo remains on 'main'. Running `agentree cd main` from within
+    // the 'other-branch' worktree must warn that 'main' lives in the main repo,
+    // not in a dedicated worktree.
+    let worktrees_dir = test_repo.worktrees_dir();
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = worktrees_dir.join(repo_name).join("other-branch");
+
+    let output = test_repo.agentree_from(&wt_path, &["cd", "main"]);
+    assert!(
+        output.status.success(),
+        "cd should succeed even when branch is in main repo: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // stdout must still be a valid cd command pointing at the main repo
+    assert!(
+        stdout.starts_with("cd '"),
+        "stdout should be a cd command: {stdout}"
+    );
+
+    // stderr must warn that the branch lives in the main repo
+    assert!(
+        stderr.contains("checked out in the main repository"),
+        "stderr should warn about main repo: {stderr}"
+    );
+    assert!(
+        stderr.contains("Tip:"),
+        "stderr should include a tip: {stderr}"
+    );
+}
+
+#[test]
+fn test_cd_warns_already_in_main_repo_on_that_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // The test repo starts on 'main'. Running `agentree cd main` while the
+    // CWD is already the main repo should emit the "already here" variant.
+    let output = test_repo.agentree(&["cd", "main"]);
+    assert!(
+        output.status.success(),
+        "cd should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("already here"),
+        "stderr should say 'already here': {stderr}"
+    );
+    assert!(
+        stderr.contains("Tip:"),
+        "stderr should include a tip: {stderr}"
+    );
+}
+
+#[test]
 fn test_list_shows_created_column() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
