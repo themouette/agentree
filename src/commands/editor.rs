@@ -1,8 +1,6 @@
 use crate::backend::run_interactive;
-use crate::config;
+use crate::commands::common::WorkspaceContext;
 use crate::error::Result;
-use crate::utils::git::get_git_root;
-use crate::worktree::{metadata::WorktreeMetadata, operations, validation};
 use clap::Parser;
 
 /// Open an editor in a workspace
@@ -33,63 +31,21 @@ pub struct EditorArgs {
 }
 
 pub fn execute(args: EditorArgs) -> Result<()> {
-    // Check git version
-    validation::check_git_version()?;
-
-    // Find repository root
-    let repo_root = get_git_root()?.ok_or_else(|| {
-        crate::error::AgentreeError::Worktree(
-            "Not in a git repository. Run this command from inside a git repository.".to_string(),
-        )
-    })?;
-
-    // Check for submodules and warn
-    validation::check_submodules_and_warn(&repo_root);
-
-    // Load config with CLI overrides
-    let config = config::load(&repo_root)?.with_cli_overrides(
+    let ctx = WorkspaceContext::init(
         args.backend.as_deref(),
         args.worktree_location.as_deref(),
-        None, // agent not used
+        None,
         args.editor.as_deref(),
     )?;
 
-    // Ensure workspace exists (auto-create if needed)
-    let result = operations::ensure_workspace(
-        &config.worktree,
-        &repo_root,
-        &args.branch,
-        args.start_ref.as_deref(),
-    )?;
+    let workspace = ctx.ensure_workspace(&args.branch, args.start_ref.as_deref())?;
 
-    // Save metadata only for newly created workspaces
-    if result.was_created() {
-        let metadata = WorktreeMetadata::new(config.effective_backend().to_string());
-        metadata.save(result.path())?;
-    }
-    eprintln!("{}", result.message(&args.branch));
-
-    // Validate workspace path is accessible
-    let workspace_path = result.path();
-    if !workspace_path.exists() {
-        return Err(crate::error::AgentreeError::Worktree(format!(
-            "Workspace path does not exist: {}",
-            workspace_path.display()
-        )));
-    }
-
-    // Get effective editor from config (respects precedence)
-    let editor_bin = config.effective_editor();
-
-    // Combine default args from config with CLI args
-    let mut all_args = config.editor.default_args.clone();
+    let editor_bin = ctx.config.effective_editor();
+    let mut all_args = ctx.config.editor.default_args.clone();
     all_args.extend_from_slice(&args.args);
-
-    // Convert to &str references for run_interactive
     let args_refs: Vec<&str> = all_args.iter().map(|s| s.as_str()).collect();
 
-    // Run editor directly on local machine (always, regardless of backend)
-    run_interactive(&editor_bin, &args_refs, workspace_path)?;
+    run_interactive(&editor_bin, &args_refs, &workspace.path)?;
 
     Ok(())
 }

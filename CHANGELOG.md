@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Animated progress spinner shown before long git operations:
+  - During worktree **creation**: `⠙ Creating branch 'X' and worktree...` or `⠙ Creating worktree for 'X'...`
+  - During worktree **removal**: `⠙ Removing worktree for 'X'...`
+  - No spinner for instant resume (worktree already exists)
+  - Spinner is automatically hidden in non-TTY environments (CI, scripts, piped output)
+  - Applies to: `create`, `remove`, `shell`, `agent`, `exec`, `cd`
 - New `doctor` command to check worktree health and fix issues:
   - Detects orphaned directories (exist but not tracked by git)
   - Detects broken metadata (git knows about but directory missing/corrupt)

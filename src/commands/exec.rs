@@ -18,7 +18,8 @@ pub fn execute(args: ExecArgs) -> Result<()> {
     let ctx = WorkspaceContext::init(
         args.workspace.backend.as_deref(),
         args.workspace.worktree_location.as_deref(),
-        None, // agent not used in exec command
+        None,
+        None,
     )?;
 
     // Ensure workspace exists (create or resume) and set up metadata

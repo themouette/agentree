@@ -2,6 +2,7 @@ use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::{get_current_branch, get_git_root};
+use crate::utils::progress::with_spinner;
 use crate::worktree::operations::ForceLevel;
 use crate::worktree::{operations, recovery, validation};
 use clap::Parser;
@@ -107,7 +108,10 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
             if let Some(entry) = worktree_entry {
                 let workspace_path = entry.path.clone();
                 let force_level = ForceLevel::from_count(args.force);
-                match operations::delete_worktree(&branch, force_level, args.unlock) {
+                let msg = format!("Removing worktree for '{}'...", branch);
+                match with_spinner(&msg, || {
+                    operations::delete_worktree(&branch, force_level, args.unlock)
+                }) {
                     Ok(_) => {
                         removed_count += 1;
                         println!("Removed worktree for branch '{}'", branch);
@@ -149,7 +153,10 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         let workspace_path = worktree_entry.map(|e| e.path.clone());
 
         let force_level = ForceLevel::from_count(args.force);
-        operations::delete_worktree(branch, force_level, args.unlock)?;
+        let msg = format!("Removing worktree for '{}'...", branch);
+        with_spinner(&msg, || {
+            operations::delete_worktree(branch, force_level, args.unlock)
+        })?;
         println!("Removed worktree for branch '{}'", branch);
 
         // Cleanup backend resources if we found the workspace path

@@ -8,6 +8,8 @@ pub struct TestRepo {
     #[allow(dead_code)]
     temp_dir: TempDir, // Kept alive to prevent temp directory cleanup
     repo_path: PathBuf,
+    /// Path to the isolated global gitconfig used by all git/agentree calls
+    global_gitconfig: PathBuf,
 }
 
 impl TestRepo {
@@ -16,9 +18,21 @@ impl TestRepo {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let repo_path = temp_dir.path().to_path_buf();
 
+        // Write a minimal global gitconfig that disables signing so the real
+        // ~/.gitconfig (which may require a GPG key) is never consulted.
+        let global_gitconfig = temp_dir.path().join("global.gitconfig");
+        fs::write(
+            &global_gitconfig,
+            "[user]\n\temail = test@example.com\n\tname = Test User\n\
+             [commit]\n\tgpgsign = false\n\
+             [tag]\n\tgpgsign = false\n",
+        )
+        .expect("Failed to write global gitconfig");
+
         Self {
             temp_dir,
             repo_path,
+            global_gitconfig,
         }
     }
 
@@ -27,8 +41,9 @@ impl TestRepo {
         self.git(&["init"]);
         self.git(&["config", "user.email", "test@example.com"]);
         self.git(&["config", "user.name", "Test User"]);
-        // Disable GPG signing for tests
+        // Disable GPG signing for tests (belt-and-suspenders alongside global config)
         self.git(&["config", "commit.gpgsign", "false"]);
+        self.git(&["config", "tag.gpgsign", "false"]);
         // Ensure we're on main branch for consistency
         self.git(&["checkout", "-b", "main"]);
 
@@ -71,6 +86,7 @@ impl TestRepo {
         Command::new("git")
             .args(args)
             .current_dir(&self.repo_path)
+            .env("GIT_CONFIG_GLOBAL", &self.global_gitconfig)
             .output()
             .expect("Failed to run git command")
     }
@@ -82,20 +98,19 @@ impl TestRepo {
         Command::new(&binary_path)
             .args(args)
             .current_dir(&self.repo_path)
+            .env("GIT_CONFIG_GLOBAL", &self.global_gitconfig)
             .output()
             .expect("Failed to run agentree command")
     }
 
     /// Get path to the agentree binary
     fn get_agentree_binary(&self) -> PathBuf {
-        // Look for binary in target/debug or target/release
+        // Always prefer the debug binary so tests run against the code under test,
+        // not a potentially stale release build.
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let debug_binary = Path::new(manifest_dir).join("target/debug/agentree");
-        let release_binary = Path::new(manifest_dir).join("target/release/agentree");
 
-        if release_binary.exists() {
-            release_binary
-        } else if debug_binary.exists() {
+        if debug_binary.exists() {
             debug_binary
         } else {
             panic!("agentree binary not found. Run 'cargo build' first.");

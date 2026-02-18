@@ -70,6 +70,7 @@ impl WorkspaceContext {
     /// * `backend` - Optional backend override from CLI
     /// * `worktree_location` - Optional worktree location override from CLI
     /// * `agent` - Optional agent override from CLI
+    /// * `editor` - Optional editor binary override from CLI
     ///
     /// # Returns
     ///
@@ -87,6 +88,7 @@ impl WorkspaceContext {
     ///     Some("local"),
     ///     None,
     ///     None,
+    ///     None,
     /// )?;
     /// # Ok(())
     /// # }
@@ -95,6 +97,7 @@ impl WorkspaceContext {
         backend: Option<&str>,
         worktree_location: Option<&str>,
         agent: Option<&str>,
+        editor: Option<&str>,
     ) -> Result<Self> {
         use crate::backend::BackendRegistry;
         use crate::utils::git::get_git_root;
@@ -119,7 +122,7 @@ impl WorkspaceContext {
             backend,
             worktree_location,
             agent,
-            None, // editor not used by commands that use WorkspaceContext
+            editor,
         )?;
 
         // Validate the effective backend before proceeding
@@ -152,7 +155,7 @@ impl WorkspaceContext {
     /// ```no_run
     /// # use agentree::commands::common::WorkspaceContext;
     /// # fn main() -> agentree::error::Result<()> {
-    /// # let ctx = WorkspaceContext::init(None, None, None)?;
+    /// # let ctx = WorkspaceContext::init(None, None, None, None)?;
     /// let workspace = ctx.ensure_workspace("feature-branch", None)?;
     /// println!("Workspace at: {}", workspace.path.display());
     /// # Ok(())
@@ -160,22 +163,20 @@ impl WorkspaceContext {
     /// ```
     pub fn ensure_workspace(&self, branch: &str, base: Option<&str>) -> Result<WorkspaceSetup> {
         use crate::utils::git::validate_workspace_path;
-        use crate::worktree::{metadata::WorktreeMetadata, operations};
+        use crate::utils::progress::ensure_workspace_with_progress;
+        use crate::worktree::metadata::WorktreeMetadata;
 
-        // Create or resume workspace
         let result =
-            operations::ensure_workspace(&self.config.worktree, &self.repo_root, branch, base)?;
+            ensure_workspace_with_progress(&self.config.worktree, &self.repo_root, branch, base)?;
 
         let was_created = result.was_created();
 
-        // Save metadata for newly created workspaces
         if was_created {
             let metadata = WorktreeMetadata::new(self.config.effective_backend().to_string());
             metadata.save(result.path())?;
         }
         eprintln!("{}", result.message(branch));
 
-        // Validate path accessibility for backend
         validate_workspace_path(result.path(), &self.config.effective_backend())?;
 
         Ok(WorkspaceSetup {

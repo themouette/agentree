@@ -22,6 +22,7 @@ once_cell = "1.19"
 semver = "1.0.27"
 strsim = "0.11"
 console = "0.15"
+indicatif = "0.17"
 self_update = { version = "0.42", default-features = false, features = ["archive-tar", "compression-flate2", "rustls"] }
 
 [dev-dependencies]
