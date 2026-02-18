@@ -82,24 +82,32 @@ impl WorktreeFilterArgs {
 /// Simple glob matching: `*` matches any sequence of characters, `?` matches one character.
 /// Case-sensitive (git branch names are case-sensitive).
 pub fn glob_match(pattern: &str, text: &str) -> bool {
-    fn matches(p: &[char], t: &[char]) -> bool {
-        match (p, t) {
-            ([], []) => true,
-            ([], _) => false,
-            (['*', rest @ ..], _) => {
-                // Star matches zero or more chars: try consuming zero (match rest) or advancing one
-                matches(rest, t) || (!t.is_empty() && matches(p, &t[1..]))
+    fn matches(p: &str, t: &str) -> bool {
+        let mut pc = p.chars();
+        match pc.next() {
+            None => t.is_empty(),
+            Some('*') => {
+                let p_rest = pc.as_str();
+                matches(p_rest, t)
+                    || t.chars()
+                        .next()
+                        .map(|c| matches(p, &t[c.len_utf8()..]))
+                        .unwrap_or(false)
             }
-            (['?', p_rest @ ..], [_, t_rest @ ..]) => matches(p_rest, t_rest),
-            (['?', ..], []) => false,
-            ([pc, p_rest @ ..], [tc, t_rest @ ..]) if pc == tc => matches(p_rest, t_rest),
-            _ => false,
+            Some('?') => t
+                .chars()
+                .next()
+                .map(|c| matches(pc.as_str(), &t[c.len_utf8()..]))
+                .unwrap_or(false),
+            Some(a) => {
+                let mut tc = t.chars();
+                tc.next()
+                    .map(|b| a == b && matches(pc.as_str(), tc.as_str()))
+                    .unwrap_or(false)
+            }
         }
     }
-
-    let p: Vec<char> = pattern.chars().collect();
-    let t: Vec<char> = text.chars().collect();
-    matches(&p, &t)
+    matches(pattern, text)
 }
 
 /// Resolve the `"HEAD"` sentinel to the current branch name.
