@@ -6,6 +6,7 @@ use clap::Parser;
 /// Shared worktree filter flags used by `list` and `remove`.
 ///
 /// Flatten this into a command's args with `#[command(flatten)]`.
+// NOTE: update has_any() when adding new fields
 #[derive(Parser, Debug, Clone, Default)]
 pub struct WorktreeFilterArgs {
     /// Only include worktrees whose branch is merged into BASE.
@@ -206,6 +207,51 @@ pub fn resolve_head_sentinel(base: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_has_any_covers_all_fields() {
+        assert!(!WorktreeFilterArgs::default().has_any());
+        assert!(WorktreeFilterArgs {
+            merged: Some("x".into()),
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            not_merged: Some("x".into()),
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            only_locked: true,
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            not_locked: true,
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            only_dirty: true,
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            only_clean: true,
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            branch_pattern: Some("*".into()),
+            ..Default::default()
+        }
+        .has_any());
+        assert!(WorktreeFilterArgs {
+            stale_days: Some(1),
+            ..Default::default()
+        }
+        .has_any());
+    }
 
     #[test]
     fn test_resolve_head_sentinel_passthrough() {
