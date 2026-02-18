@@ -52,7 +52,7 @@ curl -fsSL https://raw.githubusercontent.com/themouette/agentree/main/install.sh
 
 ### Shell integration not working
 
-**Problem**: `agentree cd <branch>` outputs text instead of changing directory.
+**Problem**: `agentree cd` or `agentree cd <branch>` outputs text instead of changing directory.
 
 **Solution**:
 
@@ -65,7 +65,8 @@ echo 'eval "$(agentree shell-init)"' >> ~/.bashrc
 source ~/.bashrc
 
 # Test it works
-agentree cd main  # Should change directory
+agentree cd        # Should change to main repo
+agentree cd main   # Should change to 'main' workspace
 ```
 
 **Alternative**: Manual installation of shell function:

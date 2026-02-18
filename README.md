@@ -71,7 +71,7 @@ source ~/.bashrc
 
 Once shell integration is enabled, you get:
 
-- **cd command**: `agentree cd <branch>` changes directory to workspace
+- **cd command**: `agentree cd <branch>` changes directory to workspace; `agentree cd` (no argument) returns to the main repository
 - **Tab completion for branches**: `agentree create new --base <TAB>` shows your git branches
 - **Tab completion for agents**: `agentree agent my-branch --agent <TAB>` shows available agents
 - **Tab completion for backends**: `agentree create feature --backend <TAB>` shows backends
@@ -191,8 +191,11 @@ agentree editor <branch>
 agentree exec <branch> -- npm test
 agentree exec <branch> -b hotfix -- npm test  # Create from hotfix
 
-# Go to workspace directory
+# Navigate to a workspace directory
 agentree cd <branch>
+
+# Return to the main repository (from any worktree)
+agentree cd
 
 # Remove merged branches (cleanup)
 agentree remove --merged       # Uses current branch
