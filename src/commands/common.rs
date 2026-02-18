@@ -174,8 +174,8 @@ impl WorkspaceContext {
         if was_created {
             let metadata = WorktreeMetadata::new(self.config.effective_backend().to_string());
             metadata.save(result.path())?;
+            eprintln!("{}", result.message(branch));
         }
-        eprintln!("{}", result.message(branch));
 
         validate_workspace_path(result.path(), &self.config.effective_backend())?;
 
