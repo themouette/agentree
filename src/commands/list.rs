@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 #[derive(Parser, Debug)]
 pub struct ListArgs {
     /// Output format
-    #[arg(long, value_enum, default_value = "two-lines")]
+    #[arg(long, value_enum, default_value = "card")]
     pub format: OutputFormat,
 
     /// Legacy: equivalent to --format=json (deprecated)
@@ -19,11 +19,11 @@ pub struct ListArgs {
 
 #[derive(clap::ValueEnum, Clone, Debug)]
 pub enum OutputFormat {
-    /// Two-line format: summary line + absolute path on second line (default)
+    /// Two-line format: summary line + absolute path on second line
     TwoLines,
     /// Compact table with relative paths (max-width: 120)
     Table,
-    /// Card-style boxes with full absolute paths and details
+    /// Card-style boxes with full absolute paths and details (default)
     Card,
     /// Machine-readable JSON with absolute paths
     Json,

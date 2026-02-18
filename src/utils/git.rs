@@ -336,6 +336,40 @@ pub fn run_git_best_effort(args: &[&str]) -> Result<std::process::Output> {
     }
 }
 
+/// Run a git command without any timeout, blocking until the process exits.
+///
+/// Use this for long-running operations like `git worktree add` that may
+/// take an unbounded amount of time (e.g., large repos with post-checkout hooks).
+/// Unlike `run_git_command`, this function will not kill the process after 30 seconds.
+///
+/// # Arguments
+/// * `args` - Command arguments (e.g., `&["worktree", "add", "--no-track", "-b", "feature", "/path"]`)
+/// * `operation` - Human-readable operation description for error messages
+///
+/// # Example
+/// ```ignore
+/// run_git_command_no_timeout(
+///     &["worktree", "add", "--no-track", "-b", "feature", "/tmp/worktree"],
+///     "create worktree"
+/// )?;
+/// ```
+pub fn run_git_command_no_timeout(args: &[&str], operation: &str) -> Result<String> {
+    let output = Command::new("git")
+        .args(args)
+        .output()
+        .map_err(|e| AgentreeError::Git(format!("Failed to {}: {}", operation, e)))?;
+
+    if !output.status.success() {
+        return Err(AgentreeError::Git(format!(
+            "git {} failed: {}",
+            args[0],
+            String::from_utf8_lossy(&output.stderr)
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
 /// Convert a Path to &str with proper error handling
 ///
 /// This helper ensures consistent error messages when paths contain invalid UTF-8.

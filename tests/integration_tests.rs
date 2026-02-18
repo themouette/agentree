@@ -331,22 +331,26 @@ fn test_list_shows_backend_column() {
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Verify table has BACKEND column
+    // Verify card format shows the branch name and backend label
     assert!(
-        stdout.contains("BACKEND"),
-        "Table header should include BACKEND column"
+        stdout.contains("backend-test"),
+        "Should show branch name in card"
+    );
+    assert!(
+        stdout.contains("Backend:"),
+        "Card should include Backend label"
     );
 
-    // Verify worktree row shows backend (should be "local")
+    // Verify the backend value is shown as "local"
     let lines: Vec<&str> = stdout.lines().collect();
-    let backend_row = lines.iter().find(|line| line.contains("backend-test"));
-    assert!(backend_row.is_some(), "Should find backend-test in list");
+    let backend_line = lines.iter().find(|line| line.contains("Backend:"));
+    assert!(backend_line.is_some(), "Should find Backend: line in card");
 
-    let row = backend_row.unwrap();
+    let line = backend_line.unwrap();
     assert!(
-        row.contains("local"),
-        "Should show 'local' backend in row: {}",
-        row
+        line.contains("local"),
+        "Should show 'local' backend: {}",
+        line
     );
 }
 
@@ -582,22 +586,20 @@ fn test_list_default_format() {
     let output = test_repo.agentree(&["create", "default-format-test"]);
     assert!(output.status.success(), "create should succeed");
 
-    // List worktrees without format flag (should use default two-lines format)
+    // List worktrees without format flag (should use default card format)
     let output = test_repo.agentree(&["list"]);
     assert!(output.status.success(), "list should succeed");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // Verify two-lines format: header line + branch line + arrow path line
-    assert!(
-        stdout.contains("BRANCH"),
-        "Should have BRANCH column header"
-    );
+    // Verify card format: box-drawing characters and branch name in header
     assert!(
         stdout.contains("default-format-test"),
         "Should show branch name"
     );
-    assert!(stdout.contains("→"), "Should show arrow for path");
+    assert!(stdout.contains("┌─"), "Should show card top border");
+    assert!(stdout.contains("└─"), "Should show card bottom border");
+    assert!(stdout.contains("Path:"), "Should show Path label");
 }
 
 #[test]
