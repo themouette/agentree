@@ -39,6 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `agentree cd` (no branch argument) now navigates to the main repository root,
+  whether called from a worktree or from the main repo itself. This makes it easy
+  to return to the main repo before deleting a worktree or switching contexts,
+  without relying on `cd -`. The shell wrapper (`shell-init`) was updated to forward
+  all arguments after `cd` so that `agentree cd`, `agentree cd <branch>`, and
+  `agentree cd <branch> --base <ref>` all work correctly.
 - Animated progress spinner shown before long git operations:
   - During worktree **creation**: `⠙ Creating branch 'X' and worktree...` or `⠙ Creating worktree for 'X'...`
   - During worktree **removal**: `⠙ Removing worktree for 'X'...`

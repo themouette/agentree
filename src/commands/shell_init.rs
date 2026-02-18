@@ -85,30 +85,34 @@ fn parse_shell(name: &str) -> Result<Shell> {
     }
 }
 
-fn print_posix_function() {
-    print!(
-        r#"agentree() {{
+fn posix_function() -> &'static str {
+    r#"agentree() {
   if [ "$1" = "cd" ]; then
-    eval "$(command agentree cd "$2")"
+    eval "$(command agentree cd "${@:2}")"
   else
     command agentree "$@"
   fi
-}}
+}
 "#
-    );
 }
 
-fn print_fish_function() {
-    print!(
-        r#"function agentree
+fn fish_function() -> &'static str {
+    r#"function agentree
   if test "$argv[1]" = "cd"
-    eval (command agentree cd $argv[2])
+    eval (command agentree cd $argv[2..])
   else
     command agentree $argv
   end
 end
 "#
-    );
+}
+
+fn print_posix_function() {
+    print!("{}", posix_function());
+}
+
+fn print_fish_function() {
+    print!("{}", fish_function());
 }
 
 #[cfg(test)]
@@ -135,5 +139,29 @@ mod tests {
     fn test_fish_function_output() {
         // Just verify it doesn't panic
         print_fish_function();
+    }
+
+    #[test]
+    fn test_posix_cd_passes_all_remaining_args() {
+        // The wrapper must use "${@:2}" so that:
+        //   agentree cd              -> command agentree cd   (no args -> main repo)
+        //   agentree cd feature      -> command agentree cd feature
+        //   agentree cd feat -b main -> command agentree cd feat -b main
+        let wrapper = posix_function();
+        assert!(
+            wrapper.contains(r#"cd "${@:2}")"#),
+            "POSIX wrapper should pass all args after 'cd' using ${{@:2}}"
+        );
+    }
+
+    #[test]
+    fn test_fish_cd_passes_all_remaining_args() {
+        // Fish: $argv[2..] passes all args from the second onwards,
+        // so `agentree cd` with no extra args works (main repo navigation).
+        let wrapper = fish_function();
+        assert!(
+            wrapper.contains("cd $argv[2..]"),
+            "Fish wrapper should pass all args after 'cd' using $argv[2..]"
+        );
     }
 }
