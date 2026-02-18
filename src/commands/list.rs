@@ -113,22 +113,22 @@ pub fn execute(args: ListArgs) -> Result<()> {
         })
         .transpose()?;
 
-    // Get worktrees with metadata; show a spinner during per-worktree git status calls.
-    // Skipped only when --no-dirty-check is passed.
-    let check_dirty = !args.no_dirty_check;
-    let mut worktrees = if check_dirty {
-        with_spinner(
-            "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
-            || get_worktrees_with_metadata(true),
-        )?
-    } else {
-        get_worktrees_with_metadata(false)?
-    };
+    // Fetch basic metadata (no dirty check yet — filter first to avoid wasted git calls)
+    let mut worktrees = get_worktrees_with_metadata()?;
 
-    // Apply --merged filter if requested
+    // Apply --merged filter before the dirty check so we only stat surviving worktrees
     if let Some(ref base) = merged_base {
         let merged_branches = operations::list_merged_branches(base)?;
         worktrees.retain(|w| merged_branches.contains(&w.branch));
+    }
+
+    // Run dirty check on the filtered set; show a spinner during per-worktree git status calls.
+    // Skipped only when --no-dirty-check is passed.
+    if !args.no_dirty_check {
+        with_spinner(
+            "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
+            || populate_dirty_status(&mut worktrees),
+        )?;
     }
 
     // Check if there are any worktrees
@@ -153,7 +153,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
     }
 }
 
-fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
+fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
     // Get linked worktrees only (excludes main repo and detached HEADs)
     let worktree_list = recovery::list_linked_worktrees()?;
 
@@ -164,26 +164,6 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
             let activity = operations::get_last_activity(&entry.path);
             let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
 
-            let dirty = if check_dirty {
-                path_to_str(&entry.path, "worktree path")
-                    .ok()
-                    .and_then(|path_str| {
-                        run_git_query(&["-C", path_str, "status", "--short"])
-                            .ok()
-                            .flatten()
-                    })
-                    .map(|output| {
-                        if output.is_empty() {
-                            DirtyStatus::Clean
-                        } else {
-                            DirtyStatus::Dirty
-                        }
-                    })
-                    .unwrap_or(DirtyStatus::NotChecked)
-            } else {
-                DirtyStatus::NotChecked
-            };
-
             WorktreeInfo {
                 branch: entry.branch.clone().unwrap_or_default(),
                 path: entry.path.clone(),
@@ -193,7 +173,7 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
                     .unwrap_or_else(|| "unknown".to_string()),
                 created: metadata.as_ref().map(|m| m.created_at.clone()),
                 modified: activity,
-                dirty,
+                dirty: DirtyStatus::NotChecked,
                 locked: entry.locked.clone(),
             }
         })
@@ -208,6 +188,29 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
     });
 
     Ok(worktrees_with_time)
+}
+
+/// Run `git status --short` for each worktree and update its dirty field in place.
+/// Errors per worktree are treated as NotChecked (best-effort).
+fn populate_dirty_status(worktrees: &mut [WorktreeInfo]) -> Result<()> {
+    for info in worktrees.iter_mut() {
+        info.dirty = path_to_str(&info.path, "worktree path")
+            .ok()
+            .and_then(|path_str| {
+                run_git_query(&["-C", path_str, "status", "--short"])
+                    .ok()
+                    .flatten()
+            })
+            .map(|output| {
+                if output.is_empty() {
+                    DirtyStatus::Clean
+                } else {
+                    DirtyStatus::Dirty
+                }
+            })
+            .unwrap_or(DirtyStatus::NotChecked);
+    }
+    Ok(())
 }
 
 fn format_created_date(created: Option<&String>) -> String {
