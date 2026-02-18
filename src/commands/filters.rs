@@ -30,13 +30,22 @@ pub struct WorktreeFilterArgs {
     pub not_merged: Option<String>,
 
     /// Only include locked worktrees.
-    #[arg(long = "locked")]
+    #[arg(long = "locked", conflicts_with = "not_locked")]
     pub only_locked: bool,
+
+    /// Only include unlocked worktrees.
+    #[arg(long = "not-locked", conflicts_with = "only_locked")]
+    pub not_locked: bool,
 
     /// Only include worktrees with uncommitted changes (implies dirty check).
     /// Conflicts with --no-dirty-check when used with `list`.
-    #[arg(long = "dirty")]
+    #[arg(long = "dirty", conflicts_with = "only_clean")]
     pub only_dirty: bool,
+
+    /// Only include worktrees with no uncommitted changes (implies dirty check).
+    /// Conflicts with --no-dirty-check when used with `list`.
+    #[arg(long = "clean", conflicts_with = "only_dirty")]
+    pub only_clean: bool,
 
     /// Only include worktrees whose branch name matches PATTERN.
     /// Supports `*` (any sequence of characters) and `?` (any single character).
@@ -57,14 +66,16 @@ impl WorktreeFilterArgs {
         self.merged.is_some()
             || self.not_merged.is_some()
             || self.only_locked
+            || self.not_locked
             || self.only_dirty
+            || self.only_clean
             || self.branch_pattern.is_some()
             || self.stale_days.is_some()
     }
 
     /// Returns `true` if a dirty check is required by the active filters.
     pub fn requires_dirty_check(&self) -> bool {
-        self.only_dirty
+        self.only_dirty || self.only_clean
     }
 }
 

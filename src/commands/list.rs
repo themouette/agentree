@@ -103,11 +103,17 @@ pub fn execute(args: ListArgs) -> Result<()> {
     // Fetch basic metadata (no dirty check yet — filter first to avoid wasted git calls)
     let mut worktrees = get_worktrees_with_metadata()?;
 
-    // --dirty filter conflicts with --no-dirty-check (check is required to filter by it)
-    if args.no_dirty_check && args.filters.only_dirty {
-        return Err(crate::error::AgentreeError::Worktree(
-            "--no-dirty-check cannot be combined with --dirty (dirty check is required to filter by it)".to_string(),
-        ));
+    // --dirty / --clean filters conflict with --no-dirty-check (check is required to evaluate them)
+    if args.no_dirty_check && (args.filters.only_dirty || args.filters.only_clean) {
+        let flag = if args.filters.only_dirty {
+            "--dirty"
+        } else {
+            "--clean"
+        };
+        return Err(crate::error::AgentreeError::Worktree(format!(
+            "--no-dirty-check cannot be combined with {} (dirty check is required to filter by it)",
+            flag
+        )));
     }
 
     // Apply cheap filters first (no dirty check needed)
@@ -122,9 +128,12 @@ pub fn execute(args: ListArgs) -> Result<()> {
         )?;
     }
 
-    // Apply --dirty filter after the check
+    // Apply dirty/clean filter after the check
     if args.filters.only_dirty {
         worktrees.retain(|w| w.dirty == DirtyStatus::Dirty);
+    }
+    if args.filters.only_clean {
+        worktrees.retain(|w| w.dirty == DirtyStatus::Clean);
     }
 
     // Check if there are any worktrees
@@ -163,9 +172,12 @@ fn apply_list_filters(
         let merged_branches = operations::list_merged_branches(&base)?;
         worktrees.retain(|w| !merged_branches.contains(&w.branch));
     }
-    // --locked filter: keep only locked worktrees
+    // --locked / --not-locked filter
     if filters.only_locked {
         worktrees.retain(|w| w.locked.is_some());
+    }
+    if filters.not_locked {
+        worktrees.retain(|w| w.locked.is_none());
     }
     // --branch filter: keep only branches matching PATTERN
     if let Some(ref pattern) = filters.branch_pattern {

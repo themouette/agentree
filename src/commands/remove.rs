@@ -16,7 +16,9 @@ pub struct RemoveArgs {
         "merged",
         "not_merged",
         "only_locked",
+        "not_locked",
         "only_dirty",
+        "only_clean",
         "branch_pattern",
         "stale_days"
     ])]
@@ -153,9 +155,12 @@ fn apply_entry_filters(
                 .unwrap_or(false)
         });
     }
-    // --locked: keep only locked worktrees
+    // --locked / --not-locked: filter by lock status
     if filters.only_locked {
         entries.retain(|e| e.locked.is_some());
+    }
+    if filters.not_locked {
+        entries.retain(|e| e.locked.is_none());
     }
     // --branch: keep only branches matching PATTERN
     if let Some(ref pattern) = filters.branch_pattern {
@@ -205,10 +210,16 @@ fn remove_by_filters(
 
     apply_entry_filters(&mut candidates, filters)?;
 
-    // --dirty filter: keep only worktrees with uncommitted changes.
-    // Auto-imply IgnoreDirty force level so git allows the removal.
-    if filters.only_dirty {
-        candidates.retain(|e| is_worktree_dirty(&e.path));
+    // --dirty / --clean filter: retain by uncommitted-changes status.
+    if filters.only_dirty || filters.only_clean {
+        candidates.retain(|e| {
+            let dirty = is_worktree_dirty(&e.path);
+            if filters.only_dirty {
+                dirty
+            } else {
+                !dirty
+            }
+        });
     }
 
     if candidates.is_empty() {
@@ -223,7 +234,8 @@ fn remove_by_filters(
         return Ok(());
     }
 
-    // --dirty filter implies at least IgnoreDirty so git can remove the worktree
+    // --dirty filter implies at least IgnoreDirty so git can remove the worktree.
+    // --clean worktrees have no uncommitted changes so no force escalation needed.
     let force_level = if filters.only_dirty && ForceLevel::from_count(force) == ForceLevel::None {
         ForceLevel::IgnoreDirty
     } else {

@@ -2105,6 +2105,94 @@ fn test_remove_branch_pattern_filter() {
     );
 }
 
+// ─── --clean / --not-locked inverse filters ───────────────────────────────────
+
+#[test]
+fn test_list_clean_filter_shows_only_clean_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "clean-one"]);
+    test_repo.agentree(&["create", "dirty-one"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo.worktrees_dir().join(repo_name).join("dirty-one");
+    std::fs::write(dirty_path.join("change.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["list", "--clean"]);
+    assert!(output.status.success(), "list --clean should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("clean-one"), "Should show clean-one");
+    assert!(
+        !stdout.contains("dirty-one"),
+        "Should not show dirty-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_not_locked_filter_shows_only_unlocked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "free-one"]);
+    test_repo.agentree(&["create", "locked-one"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo.worktrees_dir().join(repo_name).join("locked-one");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    let output = test_repo.agentree(&["list", "--not-locked", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --not-locked should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("free-one"), "Should show free-one");
+    assert!(
+        !stdout.contains("locked-one"),
+        "Should not show locked-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_clean_filter_removes_clean_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "keep-dirty"]);
+    test_repo.agentree(&["create", "remove-clean"]);
+
+    // Make keep-dirty actually dirty
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("keep-dirty");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["remove", "--clean"]);
+    assert!(
+        output.status.success(),
+        "remove --clean should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("keep-dirty"),
+        "keep-dirty should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("remove-clean"),
+        "remove-clean should have been removed: {}",
+        stdout
+    );
+}
+
 // ─── --locked filter ─────────────────────────────────────────────────────────
 
 #[test]
