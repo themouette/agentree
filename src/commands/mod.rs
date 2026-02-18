@@ -7,6 +7,7 @@ pub mod create;
 pub mod doctor;
 pub mod editor;
 pub mod exec;
+pub mod filters;
 pub mod list;
 pub mod remove;
 pub mod shell;

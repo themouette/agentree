@@ -1,6 +1,7 @@
+use crate::commands::filters::{resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::{get_current_branch, get_git_root, path_to_str, run_git_query};
+use crate::utils::git::{get_git_root, path_to_str, run_git_query};
 use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use clap::Parser;
@@ -25,10 +26,8 @@ pub struct ListArgs {
     #[arg(long)]
     pub no_dirty_check: bool,
 
-    /// Only show worktrees whose branch is merged into BASE.
-    /// Defaults to the current branch when BASE is omitted.
-    #[arg(long, num_args(0..=1), default_missing_value = "HEAD", value_name = "BASE")]
-    pub merged: Option<String>,
+    #[command(flatten)]
+    pub filters: WorktreeFilterArgs,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -101,26 +100,11 @@ pub fn execute(args: ListArgs) -> Result<()> {
         args.format
     };
 
-    // Resolve --merged base: "HEAD" sentinel means current branch
-    let merged_base = args
-        .merged
-        .map(|base| {
-            if base == "HEAD" {
-                get_current_branch()
-            } else {
-                Ok(base)
-            }
-        })
-        .transpose()?;
-
     // Fetch basic metadata (no dirty check yet — filter first to avoid wasted git calls)
     let mut worktrees = get_worktrees_with_metadata()?;
 
-    // Apply --merged filter before the dirty check so we only stat surviving worktrees
-    if let Some(ref base) = merged_base {
-        let merged_branches = operations::list_merged_branches(base)?;
-        worktrees.retain(|w| merged_branches.contains(&w.branch));
-    }
+    // Apply cheap filters first (no dirty check needed)
+    apply_list_filters(&mut worktrees, &args.filters)?;
 
     // Run dirty check on the filtered set; show a spinner during per-worktree git status calls.
     // Skipped only when --no-dirty-check is passed.
@@ -133,10 +117,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
 
     // Check if there are any worktrees
     if worktrees.is_empty() {
-        let msg = match &merged_base {
-            Some(base) => format!("No merged worktrees found for '{}'.", base),
-            None => "No worktrees found.".to_string(),
-        };
+        let msg = empty_message(&args.filters);
         match format {
             OutputFormat::Json => println!("[]"),
             _ => println!("{}", msg),
@@ -150,6 +131,31 @@ pub fn execute(args: ListArgs) -> Result<()> {
         OutputFormat::Table => render_table(&worktrees, &repo_root),
         OutputFormat::Card => render_card(&worktrees),
         OutputFormat::Json => render_json(&worktrees),
+    }
+}
+
+/// Apply all non-dirty filters to the worktree list (no git calls beyond merged/not-merged check).
+fn apply_list_filters(
+    worktrees: &mut Vec<WorktreeInfo>,
+    filters: &WorktreeFilterArgs,
+) -> Result<()> {
+    // --merged filter: keep only worktrees whose branch is merged into BASE
+    if let Some(ref base) = filters.merged {
+        let base = resolve_head_sentinel(base)?;
+        let merged_branches = operations::list_merged_branches(&base)?;
+        worktrees.retain(|w| merged_branches.contains(&w.branch));
+    }
+    Ok(())
+}
+
+/// Build the "no results" message based on which filters are active.
+fn empty_message(filters: &WorktreeFilterArgs) -> String {
+    if let Some(ref base) = filters.merged {
+        format!("No merged worktrees found for '{}'.", base)
+    } else if filters.has_any() {
+        "No worktrees match the specified filters.".to_string()
+    } else {
+        "No worktrees found.".to_string()
     }
 }
 
