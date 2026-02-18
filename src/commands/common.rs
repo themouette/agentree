@@ -160,11 +160,41 @@ impl WorkspaceContext {
     /// ```
     pub fn ensure_workspace(&self, branch: &str, base: Option<&str>) -> Result<WorkspaceSetup> {
         use crate::utils::git::validate_workspace_path;
+        use crate::utils::progress::with_spinner;
+        use crate::worktree::operations::BranchStatus;
         use crate::worktree::{metadata::WorktreeMetadata, operations};
 
-        // Create or resume workspace
-        let result =
-            operations::ensure_workspace(&self.config.worktree, &self.repo_root, branch, base)?;
+        // Detect branch status to show intent before the slow git operation
+        let status = operations::detect_branch_status(branch)?;
+
+        let result = match &status {
+            BranchStatus::InWorktree(_) => {
+                // Already exists — instant, no spinner needed
+                operations::ensure_workspace(&self.config.worktree, &self.repo_root, branch, base)?
+            }
+            BranchStatus::ExistsNotCheckedOut => {
+                let msg = format!("Creating worktree for '{}'...", branch);
+                with_spinner(&msg, || {
+                    operations::ensure_workspace(
+                        &self.config.worktree,
+                        &self.repo_root,
+                        branch,
+                        base,
+                    )
+                })?
+            }
+            BranchStatus::DoesNotExist => {
+                let msg = format!("Creating branch '{}' and worktree...", branch);
+                with_spinner(&msg, || {
+                    operations::ensure_workspace(
+                        &self.config.worktree,
+                        &self.repo_root,
+                        branch,
+                        base,
+                    )
+                })?
+            }
+        };
 
         let was_created = result.was_created();
 

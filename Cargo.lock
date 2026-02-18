@@ -19,6 +19,7 @@ dependencies = [
  "clap_complete",
  "console",
  "dirs",
+ "indicatif",
  "once_cell",
  "predicates",
  "self_update",
