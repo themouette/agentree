@@ -457,11 +457,12 @@ fn make_relative_path(path: &Path, repo_root: &Path) -> String {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    } else {
-        s.to_string()
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    let cut = max_len.saturating_sub(3);
+    let end = s.char_indices().nth(cut).map(|(i, _)| i).unwrap_or(s.len());
+    format!("{}...", &s[..end])
 }
 
 #[cfg(test)]
