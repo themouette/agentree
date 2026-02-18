@@ -1,7 +1,9 @@
-use crate::commands::filters::{glob_match, resolve_head_sentinel, WorktreeFilterArgs};
+use crate::commands::filters::{
+    check_worktree_dirty, glob_match, resolve_head_sentinel, WorktreeFilterArgs,
+};
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::{get_git_root, path_to_str, run_git_query};
+use crate::utils::git::get_git_root;
 use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use chrono::{DateTime, Local, Utc};
@@ -251,21 +253,11 @@ fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
 /// Errors per worktree are treated as NotChecked (best-effort).
 fn populate_dirty_status(worktrees: &mut [WorktreeInfo]) -> Result<()> {
     for info in worktrees.iter_mut() {
-        info.dirty = path_to_str(&info.path, "worktree path")
-            .ok()
-            .and_then(|path_str| {
-                run_git_query(&["-C", path_str, "status", "--short"])
-                    .ok()
-                    .flatten()
-            })
-            .map(|output| {
-                if output.is_empty() {
-                    DirtyStatus::Clean
-                } else {
-                    DirtyStatus::Dirty
-                }
-            })
-            .unwrap_or(DirtyStatus::NotChecked);
+        info.dirty = match check_worktree_dirty(&info.path) {
+            Some(true) => DirtyStatus::Dirty,
+            Some(false) => DirtyStatus::Clean,
+            None => DirtyStatus::NotChecked,
+        };
     }
     Ok(())
 }

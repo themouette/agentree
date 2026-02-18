@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::utils::git::get_current_branch;
+use crate::utils::git::{get_current_branch, path_to_str, run_git_query};
 use clap::Parser;
 
 /// Shared worktree filter flags used by `list` and `remove`.
@@ -77,6 +77,18 @@ impl WorktreeFilterArgs {
     pub fn requires_dirty_check(&self) -> bool {
         self.only_dirty || self.only_clean
     }
+}
+
+/// Returns `Some(true)` if dirty, `Some(false)` if clean, `None` if the check failed.
+pub fn check_worktree_dirty(path: &std::path::Path) -> Option<bool> {
+    path_to_str(path, "worktree path")
+        .ok()
+        .and_then(|p| {
+            run_git_query(&["-C", p, "status", "--short"])
+                .ok()
+                .flatten()
+        })
+        .map(|output| !output.is_empty())
 }
 
 /// Simple glob matching: `*` matches any sequence of characters, `?` matches one character.

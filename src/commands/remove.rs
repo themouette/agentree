@@ -1,5 +1,7 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
-use crate::commands::filters::{glob_match, resolve_head_sentinel, WorktreeFilterArgs};
+use crate::commands::filters::{
+    check_worktree_dirty, glob_match, resolve_head_sentinel, WorktreeFilterArgs,
+};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -184,21 +186,6 @@ fn apply_entry_filters(
     Ok(())
 }
 
-/// Returns `true` when the worktree at `path` has uncommitted changes.
-/// Best-effort: returns `false` on error (missing path, git failure, etc.).
-fn is_worktree_dirty(path: &std::path::Path) -> bool {
-    use crate::utils::git::{path_to_str, run_git_query};
-    path_to_str(path, "worktree path")
-        .ok()
-        .and_then(|p| {
-            run_git_query(&["-C", p, "status", "--short"])
-                .ok()
-                .flatten()
-        })
-        .map(|output| !output.is_empty())
-        .unwrap_or(false)
-}
-
 /// Select worktrees via filter flags and remove them.
 fn remove_by_filters(
     filters: &WorktreeFilterArgs,
@@ -213,7 +200,7 @@ fn remove_by_filters(
     // --dirty / --clean filter: retain by uncommitted-changes status.
     if filters.only_dirty || filters.only_clean {
         candidates.retain(|e| {
-            let dirty = is_worktree_dirty(&e.path);
+            let dirty = check_worktree_dirty(&e.path).unwrap_or(false);
             if filters.only_dirty {
                 dirty
             } else {
