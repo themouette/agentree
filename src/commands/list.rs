@@ -145,6 +145,12 @@ fn apply_list_filters(
         let merged_branches = operations::list_merged_branches(&base)?;
         worktrees.retain(|w| merged_branches.contains(&w.branch));
     }
+    // --not-merged filter: keep only worktrees whose branch is NOT merged into BASE
+    if let Some(ref base) = filters.not_merged {
+        let base = resolve_head_sentinel(base)?;
+        let merged_branches = operations::list_merged_branches(&base)?;
+        worktrees.retain(|w| !merged_branches.contains(&w.branch));
+    }
     Ok(())
 }
 
@@ -152,6 +158,8 @@ fn apply_list_filters(
 fn empty_message(filters: &WorktreeFilterArgs) -> String {
     if let Some(ref base) = filters.merged {
         format!("No merged worktrees found for '{}'.", base)
+    } else if let Some(ref base) = filters.not_merged {
+        format!("No unmerged worktrees found for '{}'.", base)
     } else if filters.has_any() {
         "No worktrees match the specified filters.".to_string()
     } else {

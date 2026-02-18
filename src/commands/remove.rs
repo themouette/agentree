@@ -11,8 +11,8 @@ use clap::Parser;
 #[derive(Parser, Debug)]
 pub struct RemoveArgs {
     /// Branch names to remove (can specify multiple).
-    /// Mutually exclusive with filter flags (--merged, --locked, etc.).
-    #[arg(required_unless_present_any = ["merged"])]
+    /// Mutually exclusive with filter flags (--merged, --not-merged, etc.).
+    #[arg(required_unless_present_any = ["merged", "not_merged"])]
     pub branches: Vec<String>,
 
     /// Force removal even with uncommitted changes or locked status
@@ -135,6 +135,17 @@ fn apply_entry_filters(
                 .unwrap_or(false)
         });
     }
+    // --not-merged: keep only branches NOT merged into BASE
+    if let Some(ref base) = filters.not_merged {
+        let base = resolve_head_sentinel(base)?;
+        let merged_branches = operations::list_merged_branches(&base)?;
+        entries.retain(|e| {
+            e.branch
+                .as_deref()
+                .map(|b| !merged_branches.contains(&b.to_string()))
+                .unwrap_or(false)
+        });
+    }
     Ok(())
 }
 
@@ -152,6 +163,8 @@ fn remove_by_filters(
     if candidates.is_empty() {
         let msg = if let Some(ref base) = filters.merged {
             format!("No merged worktrees found for '{}'.", base)
+        } else if let Some(ref base) = filters.not_merged {
+            format!("No unmerged worktrees found for '{}'.", base)
         } else {
             "No worktrees match the specified filters.".to_string()
         };

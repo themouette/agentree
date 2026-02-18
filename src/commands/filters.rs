@@ -13,15 +13,27 @@ pub struct WorktreeFilterArgs {
         long,
         num_args(0..=1),
         default_missing_value = "HEAD",
-        value_name = "BASE"
+        value_name = "BASE",
+        conflicts_with = "not_merged"
     )]
     pub merged: Option<String>,
+
+    /// Only include worktrees whose branch is NOT merged into BASE.
+    /// Defaults to the current branch when BASE is omitted.
+    #[arg(
+        long,
+        num_args(0..=1),
+        default_missing_value = "HEAD",
+        value_name = "BASE",
+        conflicts_with = "merged"
+    )]
+    pub not_merged: Option<String>,
 }
 
 impl WorktreeFilterArgs {
     /// Returns `true` if any filter flag is set.
     pub fn has_any(&self) -> bool {
-        self.merged.is_some()
+        self.merged.is_some() || self.not_merged.is_some()
     }
 }
 
