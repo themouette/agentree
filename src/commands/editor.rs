@@ -2,6 +2,8 @@ use crate::backend::run_interactive;
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
+use crate::utils::progress::with_spinner;
+use crate::worktree::operations::BranchStatus;
 use crate::worktree::{metadata::WorktreeMetadata, operations, validation};
 use clap::Parser;
 
@@ -54,13 +56,39 @@ pub fn execute(args: EditorArgs) -> Result<()> {
         args.editor.as_deref(),
     )?;
 
-    // Ensure workspace exists (auto-create if needed)
-    let result = operations::ensure_workspace(
-        &config.worktree,
-        &repo_root,
-        &args.branch,
-        args.start_ref.as_deref(),
-    )?;
+    // Detect branch status to show intent before the slow git operation
+    let status = operations::detect_branch_status(&args.branch)?;
+
+    let result = match &status {
+        BranchStatus::InWorktree(_) => operations::ensure_workspace(
+            &config.worktree,
+            &repo_root,
+            &args.branch,
+            args.start_ref.as_deref(),
+        )?,
+        BranchStatus::ExistsNotCheckedOut => {
+            let msg = format!("Creating worktree for '{}'...", args.branch);
+            with_spinner(&msg, || {
+                operations::ensure_workspace(
+                    &config.worktree,
+                    &repo_root,
+                    &args.branch,
+                    args.start_ref.as_deref(),
+                )
+            })?
+        }
+        BranchStatus::DoesNotExist => {
+            let msg = format!("Creating branch '{}' and worktree...", args.branch);
+            with_spinner(&msg, || {
+                operations::ensure_workspace(
+                    &config.worktree,
+                    &repo_root,
+                    &args.branch,
+                    args.start_ref.as_deref(),
+                )
+            })?
+        }
+    };
 
     // Save metadata only for newly created workspaces
     if result.was_created() {
