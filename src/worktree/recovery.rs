@@ -93,11 +93,13 @@ pub fn list_linked_worktrees() -> Result<Vec<WorktreeEntry>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
 
     #[test]
+    #[serial]
     fn test_check_stale_metadata_does_not_error() {
         // Create a temporary git repo for testing
         let dir = TempDir::new().unwrap();
@@ -132,6 +134,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_list_linked_worktrees_empty() {
         let dir = TempDir::new().unwrap();
         let repo_path = dir.path();
@@ -161,6 +164,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_list_linked_worktrees_excludes_main_repo() {
         let dir = TempDir::new().unwrap();
         let repo_path = dir.path();
@@ -207,6 +211,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_try_repair_does_not_error() {
         // Create a temporary git repo for testing
         let dir = TempDir::new().unwrap();
