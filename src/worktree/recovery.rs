@@ -76,6 +76,20 @@ pub fn ensure_clean_state() -> Result<Vec<WorktreeEntry>> {
     list_worktrees()
 }
 
+/// Return only linked worktrees (excludes the main repo and detached HEADs).
+///
+/// `git worktree list` always puts the main repository first. This helper
+/// skips that first entry and keeps only entries that have a branch name,
+/// so callers never accidentally operate on the main repo.
+pub fn list_linked_worktrees() -> Result<Vec<WorktreeEntry>> {
+    let all = ensure_clean_state()?;
+    Ok(all
+        .into_iter()
+        .skip(1)
+        .filter(|e| e.branch.is_some())
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,6 +129,81 @@ mod tests {
         // Should not error even if nothing is stale
         let result = check_stale_metadata();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_list_linked_worktrees_empty() {
+        let dir = TempDir::new().unwrap();
+        let repo_path = dir.path();
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        fs::write(repo_path.join("test.txt"), "test").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        std::env::set_current_dir(repo_path).unwrap();
+
+        // No linked worktrees — result must be empty (main repo excluded)
+        let result = list_linked_worktrees().unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_list_linked_worktrees_excludes_main_repo() {
+        let dir = TempDir::new().unwrap();
+        let repo_path = dir.path();
+        let wt_path = dir.path().join("wt-feature");
+
+        Command::new("git")
+            .args(["init"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        fs::write(repo_path.join("test.txt"), "test").unwrap();
+        Command::new("git")
+            .args(["add", "."])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Add a linked worktree on a new branch
+        Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "-b",
+                "feature",
+                wt_path.to_str().unwrap(),
+            ])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        std::env::set_current_dir(repo_path).unwrap();
+
+        let result = list_linked_worktrees().unwrap();
+
+        // Only the linked worktree — main repo must not appear
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].branch.as_deref(), Some("feature"));
+        assert_ne!(result[0].path, repo_path);
     }
 
     #[test]

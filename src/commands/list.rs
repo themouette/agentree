@@ -91,15 +91,8 @@ pub fn execute(args: ListArgs) -> Result<()> {
 }
 
 fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
-    // Get worktrees with auto-prune
-    let worktrees = recovery::ensure_clean_state()?;
-
-    // Skip the first entry (main repo) and get worktrees with branches
-    let worktree_list: Vec<_> = worktrees
-        .iter()
-        .skip(1)
-        .filter(|e| e.branch.is_some())
-        .collect();
+    // Get linked worktrees only (excludes main repo and detached HEADs)
+    let worktree_list = recovery::list_linked_worktrees()?;
 
     // Get last activity for each worktree and create sortable tuples
     let mut worktrees_with_time: Vec<_> = worktree_list
