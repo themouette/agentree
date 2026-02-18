@@ -1,4 +1,6 @@
-use crate::commands::filters::{check_worktree_dirty, WorktreeFilterArgs, WorktreeFilterable};
+use crate::commands::filters::{
+    check_worktree_dirty, resolve_head_sentinel, WorktreeFilterArgs, WorktreeFilterable,
+};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -174,9 +176,11 @@ pub fn execute(args: ListArgs) -> Result<()> {
 /// Build the "no results" message based on which filters are active.
 fn empty_message(filters: &WorktreeFilterArgs) -> String {
     if let Some(ref base) = filters.merged {
-        format!("No merged worktrees found for '{}'.", base)
+        let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+        format!("No merged worktrees found for '{}'.", resolved)
     } else if let Some(ref base) = filters.not_merged {
-        format!("No unmerged worktrees found for '{}'.", base)
+        let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+        format!("No unmerged worktrees found for '{}'.", resolved)
     } else if filters.has_any() {
         "No worktrees match the specified filters.".to_string()
     } else {

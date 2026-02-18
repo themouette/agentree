@@ -1,5 +1,5 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
-use crate::commands::filters::{check_worktree_dirty, WorktreeFilterArgs};
+use crate::commands::filters::{check_worktree_dirty, resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
 use crate::error::Result;
 use crate::utils::git::get_git_root;
@@ -149,9 +149,11 @@ fn remove_by_filters(
 
     if candidates.is_empty() {
         let msg = if let Some(ref base) = filters.merged {
-            format!("No merged worktrees found for '{}'.", base)
+            let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+            format!("No merged worktrees found for '{}'.", resolved)
         } else if let Some(ref base) = filters.not_merged {
-            format!("No unmerged worktrees found for '{}'.", base)
+            let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+            format!("No unmerged worktrees found for '{}'.", resolved)
         } else {
             "No worktrees match the specified filters.".to_string()
         };
