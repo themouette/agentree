@@ -20,9 +20,10 @@ pub struct ListArgs {
     #[arg(long, conflicts_with = "format")]
     pub json: bool,
 
-    /// Check each worktree for uncommitted changes (slower: runs git status per worktree)
+    /// Skip uncommitted-changes check for faster output.
+    /// By default, git status is run for each worktree.
     #[arg(long)]
-    pub dirty: bool,
+    pub no_dirty_check: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -40,7 +41,7 @@ pub enum OutputFormat {
 /// Whether a worktree has uncommitted changes.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum DirtyStatus {
-    /// The --dirty flag was not passed; no check was performed.
+    /// --no-dirty-check was passed; check was skipped.
     NotChecked,
     /// Check was performed: worktree is clean.
     Clean,
@@ -55,7 +56,7 @@ struct WorktreeJson {
     backend: Option<String>,
     created: Option<String>,
     modified: Option<String>,
-    /// null when --dirty was not requested, true/false when checked.
+    /// null when --no-dirty-check was passed, true/false when checked.
     dirty: Option<bool>,
     /// null when not locked, "" when locked without reason, reason string otherwise.
     locked: Option<String>,
@@ -95,11 +96,14 @@ pub fn execute(args: ListArgs) -> Result<()> {
         args.format
     };
 
-    // Get worktrees with metadata; show a spinner when --dirty triggers per-worktree git calls
-    let worktrees = if args.dirty {
-        with_spinner("Checking for uncommitted changes...", || {
-            get_worktrees_with_metadata(true)
-        })?
+    // Get worktrees with metadata; show a spinner during per-worktree git status calls.
+    // Skipped only when --no-dirty-check is passed.
+    let check_dirty = !args.no_dirty_check;
+    let worktrees = if check_dirty {
+        with_spinner(
+            "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
+            || get_worktrees_with_metadata(true),
+        )?
     } else {
         get_worktrees_with_metadata(false)?
     };
@@ -448,12 +452,8 @@ mod tests {
     }
 
     #[test]
-    fn test_card_omits_dirty_when_not_checked() {
-        use std::io::Write;
-
-        // Capture stdout by running render_card and checking it does not
-        // contain "Dirty:" when status is NotChecked.
-        // We re-implement the card dirty logic directly to keep this unit-level.
+    fn test_card_omits_dirty_when_skipped() {
+        // When --no-dirty-check is passed the dirty line should be absent.
         let info = make_info(DirtyStatus::NotChecked, None);
         let dirty_line = match info.dirty {
             DirtyStatus::Clean => Some("Dirty:    no"),
@@ -462,7 +462,7 @@ mod tests {
         };
         assert!(
             dirty_line.is_none(),
-            "Dirty line should be absent when not checked"
+            "Dirty line should be absent when check was skipped"
         );
     }
 
