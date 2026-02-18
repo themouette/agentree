@@ -1,6 +1,6 @@
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::get_git_root;
+use crate::utils::git::{get_git_root, path_to_str, run_git_query};
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use clap::Parser;
 use serde::Serialize;
@@ -15,6 +15,10 @@ pub struct ListArgs {
     /// Legacy: equivalent to --format=json (deprecated)
     #[arg(long, conflicts_with = "format")]
     pub json: bool,
+
+    /// Check each worktree for uncommitted changes (slower: runs git status per worktree)
+    #[arg(long)]
+    pub dirty: bool,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -36,6 +40,8 @@ struct WorktreeJson {
     backend: Option<String>,
     created: Option<String>,
     modified: Option<String>,
+    dirty: Option<bool>,
+    locked: Option<String>,
 }
 
 /// Internal representation of a worktree with its metadata for rendering
@@ -45,6 +51,10 @@ struct WorktreeInfo {
     backend: String,
     created: Option<String>,
     modified: Option<std::time::SystemTime>,
+    /// None = not checked, Some(true/false) = checked
+    is_dirty: Option<bool>,
+    /// None = not locked, Some("") = locked no reason, Some(msg) = locked with reason
+    locked: Option<String>,
 }
 
 pub fn execute(args: ListArgs) -> Result<()> {
@@ -70,7 +80,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
     };
 
     // Get worktrees with metadata
-    let worktrees = get_worktrees_with_metadata()?;
+    let worktrees = get_worktrees_with_metadata(args.dirty)?;
 
     // Check if there are any worktrees
     if worktrees.is_empty() {
@@ -90,7 +100,7 @@ pub fn execute(args: ListArgs) -> Result<()> {
     }
 }
 
-fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
+fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
     // Get linked worktrees only (excludes main repo and detached HEADs)
     let worktree_list = recovery::list_linked_worktrees()?;
 
@@ -101,6 +111,21 @@ fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
             let activity = operations::get_last_activity(&entry.path);
             let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
 
+            let is_dirty = if check_dirty {
+                let dirty = path_to_str(&entry.path, "worktree path")
+                    .ok()
+                    .and_then(|path_str| {
+                        run_git_query(&["-C", path_str, "status", "--short"])
+                            .ok()
+                            .flatten()
+                    })
+                    .map(|output| !output.is_empty())
+                    .unwrap_or(false);
+                Some(dirty)
+            } else {
+                None
+            };
+
             WorktreeInfo {
                 branch: entry.branch.clone().unwrap_or_default(),
                 path: entry.path.clone(),
@@ -110,6 +135,8 @@ fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
                     .unwrap_or_else(|| "unknown".to_string()),
                 created: metadata.as_ref().map(|m| m.created_at.clone()),
                 modified: activity,
+                is_dirty,
+                locked: entry.locked.clone(),
             }
         })
         .collect();
@@ -152,6 +179,8 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
                 backend: Some(info.backend.clone()),
                 created: info.created.clone(),
                 modified,
+                dirty: info.is_dirty,
+                locked: info.locked.clone(),
             }
         })
         .collect();
@@ -162,7 +191,10 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
 
 fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
     // Header
-    println!("{:<30} {:<12} {:<20}", "BRANCH", "BACKEND", "MODIFIED");
+    println!(
+        "{:<30} {:<12} {:<20} {:<2}",
+        "BRANCH", "BACKEND", "MODIFIED", "ST"
+    );
 
     for info in worktrees {
         let modified = info
@@ -170,12 +202,15 @@ fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
             .map(operations::format_activity)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        // First line: branch, backend, modified
+        let st = format_status(info.is_dirty, info.locked.as_deref());
+
+        // First line: branch, backend, modified, status
         println!(
-            "{:<30} {:<12} {:<20}",
+            "{:<30} {:<12} {:<20} {:<2}",
             truncate(&info.branch, 30),
             truncate(&info.backend, 12),
-            modified
+            modified,
+            st
         );
 
         // Second line: absolute path with arrow
@@ -188,8 +223,8 @@ fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
 fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
     // Header with 120 max width
     println!(
-        "{:<25} {:<50} {:<12} {:<18} {:<15}",
-        "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED"
+        "{:<25} {:<50} {:<12} {:<18} {:<15} {:<2}",
+        "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED", "ST"
     );
 
     for info in worktrees {
@@ -203,13 +238,16 @@ fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
             .map(operations::format_activity)
             .unwrap_or_else(|| "Unknown".to_string());
 
+        let st = format_status(info.is_dirty, info.locked.as_deref());
+
         println!(
-            "{:<25} {:<50} {:<12} {:<18} {:<15}",
+            "{:<25} {:<50} {:<12} {:<18} {:<15} {:<2}",
             truncate(&info.branch, 25),
             truncate(&path_display, 50),
             truncate(&info.backend, 12),
             created,
-            modified
+            modified,
+            st
         );
     }
 
@@ -234,10 +272,34 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
         println!("│  Backend:  {}", info.backend);
         println!("│  Created:  {}", created);
         println!("│  Modified: {}", modified);
+        if let Some(dirty) = info.is_dirty {
+            println!("│  Dirty:    {}", if dirty { "yes" } else { "no" });
+        }
+        if let Some(lock_reason) = &info.locked {
+            if lock_reason.is_empty() {
+                println!("│  Locked:   yes");
+            } else {
+                println!("│  Locked:   yes ({})", lock_reason);
+            }
+        }
         println!("└─");
     }
 
     Ok(())
+}
+
+/// Format a 2-character status column: `*` for dirty, `L` for locked.
+/// - `  ` — clean, not locked
+/// - `* ` — dirty, not locked
+/// - ` L` — clean, locked
+/// - `*L` — dirty and locked
+fn format_status(is_dirty: Option<bool>, locked: Option<&str>) -> String {
+    let dirty_char = match is_dirty {
+        Some(true) => '*',
+        _ => ' ',
+    };
+    let lock_char = if locked.is_some() { 'L' } else { ' ' };
+    format!("{}{}", dirty_char, lock_char)
 }
 
 fn make_relative_path(path: &Path, repo_root: &Path) -> String {
@@ -262,5 +324,64 @@ fn truncate(s: &str, max_len: usize) -> String {
         format!("{}...", &s[..max_len.saturating_sub(3)])
     } else {
         s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_status_clean_unlocked() {
+        assert_eq!(format_status(Some(false), None), "  ");
+    }
+
+    #[test]
+    fn test_format_status_not_checked_unlocked() {
+        assert_eq!(format_status(None, None), "  ");
+    }
+
+    #[test]
+    fn test_format_status_dirty_unlocked() {
+        assert_eq!(format_status(Some(true), None), "* ");
+    }
+
+    #[test]
+    fn test_format_status_clean_locked_no_reason() {
+        assert_eq!(format_status(Some(false), Some("")), " L");
+    }
+
+    #[test]
+    fn test_format_status_clean_locked_with_reason() {
+        assert_eq!(format_status(Some(false), Some("in use")), " L");
+    }
+
+    #[test]
+    fn test_format_status_not_checked_locked() {
+        assert_eq!(format_status(None, Some("")), " L");
+    }
+
+    #[test]
+    fn test_format_status_dirty_locked() {
+        assert_eq!(format_status(Some(true), Some("in use")), "*L");
+    }
+
+    #[test]
+    fn test_format_status_always_two_chars() {
+        // All combinations should produce exactly 2 characters
+        for is_dirty in [None, Some(false), Some(true)] {
+            for locked in [None, Some(""), Some("reason")] {
+                let status = format_status(is_dirty, locked);
+                assert_eq!(
+                    status.len(),
+                    2,
+                    "format_status({:?}, {:?}) = {:?} (len {})",
+                    is_dirty,
+                    locked,
+                    status,
+                    status.len()
+                );
+            }
+        }
     }
 }

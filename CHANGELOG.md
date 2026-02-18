@@ -47,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `list` command now shows locked worktree status in all formats (always visible, free — data
+  comes from the existing `git worktree list --porcelain` call):
+  - **card**: `Locked: yes` or `Locked: yes (<reason>)` line added to each card
+  - **table / two-lines**: `ST` column with `L` symbol when locked
+- New `--dirty` flag for `list` command: runs `git status --short` per worktree and shows
+  uncommitted-changes indicator (opt-in because it adds one git call per worktree):
+  - **card**: `Dirty: yes/no` line added to each card
+  - **table / two-lines**: `*` symbol in the `ST` column when dirty
+  - **json**: `dirty` field is `null` when not requested, `true`/`false` when `--dirty` is used;
+    `locked` field is always present (`null` or the lock reason string)
+  - Errors during the status check (e.g. missing path) are treated as clean and do not abort the list
 - `agentree cd <branch>` now warns on stderr when the requested branch is
   checked out in the main repository rather than in a dedicated worktree (git
   forbids the same branch from being checked out in two places). Two variants:
