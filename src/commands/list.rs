@@ -151,6 +151,10 @@ fn apply_list_filters(
         let merged_branches = operations::list_merged_branches(&base)?;
         worktrees.retain(|w| !merged_branches.contains(&w.branch));
     }
+    // --locked filter: keep only locked worktrees
+    if filters.only_locked {
+        worktrees.retain(|w| w.locked.is_some());
+    }
     Ok(())
 }
 

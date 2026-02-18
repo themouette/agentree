@@ -12,7 +12,7 @@ use clap::Parser;
 pub struct RemoveArgs {
     /// Branch names to remove (can specify multiple).
     /// Mutually exclusive with filter flags (--merged, --not-merged, etc.).
-    #[arg(required_unless_present_any = ["merged", "not_merged"])]
+    #[arg(required_unless_present_any = ["merged", "not_merged", "only_locked"])]
     pub branches: Vec<String>,
 
     /// Force removal even with uncommitted changes or locked status
@@ -146,6 +146,10 @@ fn apply_entry_filters(
                 .unwrap_or(false)
         });
     }
+    // --locked: keep only locked worktrees
+    if filters.only_locked {
+        entries.retain(|e| e.locked.is_some());
+    }
     Ok(())
 }
 
@@ -173,6 +177,8 @@ fn remove_by_filters(
     }
 
     let force_level = ForceLevel::from_count(force);
+    // --locked filter implies automatic unlock so git can remove the worktree
+    let effective_unlock = unlock || filters.only_locked;
     let mut removed = 0;
 
     for entry in candidates {
@@ -184,7 +190,7 @@ fn remove_by_filters(
         let msg = format!("Removing worktree for '{}'...", branch);
 
         match with_spinner(&msg, || {
-            operations::delete_worktree(&branch, force_level, unlock)
+            operations::delete_worktree(&branch, force_level, effective_unlock)
         }) {
             Ok(_) => {
                 removed += 1;

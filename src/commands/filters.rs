@@ -28,12 +28,16 @@ pub struct WorktreeFilterArgs {
         conflicts_with = "merged"
     )]
     pub not_merged: Option<String>,
+
+    /// Only include locked worktrees.
+    #[arg(long = "locked")]
+    pub only_locked: bool,
 }
 
 impl WorktreeFilterArgs {
     /// Returns `true` if any filter flag is set.
     pub fn has_any(&self) -> bool {
-        self.merged.is_some() || self.not_merged.is_some()
+        self.merged.is_some() || self.not_merged.is_some() || self.only_locked
     }
 }
 

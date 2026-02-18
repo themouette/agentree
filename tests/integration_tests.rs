@@ -1896,6 +1896,81 @@ fn test_doctor_json_with_issues() {
     assert!(first_issue.get("fix").is_some(), "Issue should have fix");
 }
 
+// ─── --locked filter ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_locked_shows_only_locked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "free-branch"]);
+    test_repo.agentree(&["create", "locked-branch"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("locked-branch");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    let output = test_repo.agentree(&["list", "--locked", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("locked-branch"),
+        "Should show locked-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("free-branch"),
+        "Should not show free-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_locked_filter_removes_locked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "keep-branch"]);
+    test_repo.agentree(&["create", "to-remove-locked"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("to-remove-locked");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    // remove --locked should remove locked worktrees (auto-unlocks)
+    let output = test_repo.agentree(&["remove", "--locked"]);
+    assert!(
+        output.status.success(),
+        "remove --locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("keep-branch"),
+        "keep-branch should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("to-remove-locked"),
+        "to-remove-locked should have been removed: {}",
+        stdout
+    );
+}
+
 // ─── --not-merged filter ────────────────────────────────────────────────────
 
 #[test]
@@ -1911,7 +1986,10 @@ fn test_list_not_merged_filters_worktrees() {
     let repo_name = test_repo.path().file_name().unwrap();
 
     // Give active-work a unique commit so it is genuinely not merged
-    let active_path = test_repo.worktrees_dir().join(repo_name).join("active-work");
+    let active_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("active-work");
     std::fs::write(active_path.join("active.txt"), "content").unwrap();
     Command::new("git")
         .args(["add", "."])
