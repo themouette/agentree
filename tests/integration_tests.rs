@@ -2465,3 +2465,57 @@ fn test_remove_not_locked_filter_removes_unlocked_worktrees() {
         stdout
     );
 }
+
+#[test]
+fn test_list_merged_empty_message_uses_current_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree with its own commit so it is genuinely not merged
+    test_repo.agentree(&["create", "unmerged-for-sentinel"]);
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("unmerged-for-sentinel");
+    std::fs::write(wt_path.join("work.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+
+    // Get the current branch name (should be "main")
+    let branch_output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("git symbolic-ref should work");
+    let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+
+    // Run list --merged without a value (sentinel HEAD should be resolved to current branch)
+    let output = test_repo.agentree(&["list", "--merged", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --merged should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The empty message must NOT contain "HEAD" and MUST contain the branch name
+    assert!(
+        !stdout.contains("'HEAD'"),
+        "Empty message should not show HEAD sentinel: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains(&current_branch),
+        "Empty message should show current branch '{}': {}",
+        current_branch,
+        stdout
+    );
+}
