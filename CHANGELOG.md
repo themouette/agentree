@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-19
+
 ### Changed
 
 - `list` command now defaults to `card` format instead of `two-lines`, showing full
@@ -218,5 +220,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflows for automated testing and releases
 - Install script for easy installation
 
-[Unreleased]: https://github.com/themouette/agentree/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/themouette/agentree/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/themouette/agentree/compare/v0.1.0...v0.7.0
 [0.1.0]: https://github.com/themouette/agentree/releases/tag/v0.1.0
