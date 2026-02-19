@@ -219,3 +219,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install script for easy installation
 
 [Unreleased]: https://github.com/themouette/agentree/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/themouette/agentree/releases/tag/v0.1.0
