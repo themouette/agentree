@@ -658,6 +658,112 @@ fn test_list_card_format() {
 }
 
 #[test]
+fn test_list_merged_filters_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create two worktrees
+    test_repo.agentree(&["create", "merged-branch"]);
+    test_repo.agentree(&["create", "unmerged-branch"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+
+    // Give unmerged-branch its own commit so it is genuinely not merged
+    let unmerged_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("unmerged-branch");
+    std::fs::write(unmerged_path.join("unmerged.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&unmerged_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&unmerged_path)
+        .output()
+        .expect("git commit should work");
+
+    // Commit something in merged-branch and merge it into main
+    let merged_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("merged-branch");
+    std::fs::write(merged_path.join("merged.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&merged_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Add merged file"])
+        .current_dir(&merged_path)
+        .output()
+        .expect("git commit should work");
+    test_repo.git(&[
+        "merge",
+        "--no-ff",
+        "merged-branch",
+        "-m",
+        "Merge merged-branch",
+    ]);
+
+    // list --merged main should show only merged-branch
+    let output = test_repo.agentree(&["list", "--merged", "main", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("merged-branch"),
+        "Should show merged-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("unmerged-branch"),
+        "Should not show unmerged-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_merged_empty_message() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree with its own commit so it is genuinely not merged
+    test_repo.agentree(&["create", "not-merged"]);
+    let repo_name = test_repo.path().file_name().unwrap();
+    let worktree_path = test_repo.worktrees_dir().join(repo_name).join("not-merged");
+    std::fs::write(worktree_path.join("work.txt"), "content").expect("Failed to create file");
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git add should work");
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&worktree_path)
+        .output()
+        .expect("git commit should work");
+
+    // list --merged main should show the specific empty message
+    let output = test_repo.agentree(&["list", "--merged", "main", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --merged should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No merged worktrees found for 'main'"),
+        "Should show targeted empty message: {}",
+        stdout
+    );
+}
+
+#[test]
 fn test_list_json_format() {
     let test_repo = TestRepo::new();
     test_repo.init_git();
@@ -1146,6 +1252,105 @@ fn test_editor_help_shows_options() {
     assert!(
         stdout.contains("ARGS"),
         "Help should mention additional args"
+    );
+}
+
+// ─── remove --dry-run ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_remove_dry_run_does_not_remove_worktree() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["create", "dry-run-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Dry-run: should succeed without removing anything
+    let output = test_repo.agentree(&["remove", "--dry-run", "dry-run-branch"]);
+    assert!(
+        output.status.success(),
+        "remove --dry-run should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Would remove"),
+        "Should print dry-run message: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("dry-run-branch"),
+        "Should mention the branch: {}",
+        stdout
+    );
+
+    // Worktree must still exist
+    let list = test_repo.agentree(&["list"]);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("dry-run-branch"),
+        "Worktree should still exist after --dry-run: {}",
+        list_stdout
+    );
+}
+
+#[test]
+fn test_remove_dry_run_merged_filter_does_not_remove() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["create", "dry-merged-branch"]);
+    assert!(output.status.success(), "create should succeed");
+
+    // Add a commit and merge it into main
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dry-merged-branch");
+    std::fs::write(wt_path.join("f.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feat"])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    test_repo.git(&["merge", "--no-ff", "dry-merged-branch", "-m", "Merge"]);
+
+    // Dry-run with --merged: should list the candidate without removing it
+    let output = test_repo.agentree(&["remove", "--dry-run", "--merged", "main"]);
+    assert!(
+        output.status.success(),
+        "remove --dry-run --merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Would remove"),
+        "Should print dry-run message: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("dry-merged-branch"),
+        "Should mention the matched branch: {}",
+        stdout
+    );
+
+    // Worktree must still exist
+    let list = test_repo.agentree(&["list"]);
+    let list_stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        list_stdout.contains("dry-merged-branch"),
+        "Worktree should still exist after --dry-run: {}",
+        list_stdout
     );
 }
 
@@ -1788,4 +1993,628 @@ fn test_doctor_json_with_issues() {
         "Issue should have description"
     );
     assert!(first_issue.get("fix").is_some(), "Issue should have fix");
+}
+
+// ─── --dirty filter ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_dirty_filter_shows_only_dirty_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "clean-branch"]);
+    test_repo.agentree(&["create", "dirty-filter-branch"]);
+
+    // Make uncommitted changes in dirty-filter-branch
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("dirty-filter-branch");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["list", "--dirty"]);
+    assert!(
+        output.status.success(),
+        "list --dirty should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("dirty-filter-branch"),
+        "Should show dirty-filter-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("clean-branch"),
+        "Should not show clean-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_dirty_conflicts_with_no_dirty_check() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["list", "--dirty", "--no-dirty-check"]);
+    assert!(
+        !output.status.success(),
+        "Combining --dirty and --no-dirty-check should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("--no-dirty-check") || stderr.contains("--dirty"),
+        "Should mention conflicting flags: {}",
+        stderr
+    );
+}
+
+#[test]
+fn test_remove_dirty_filter_removes_dirty_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "will-keep"]);
+    test_repo.agentree(&["create", "will-remove-dirty"]);
+
+    // Make uncommitted changes only in will-remove-dirty
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("will-remove-dirty");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    // remove --dirty should remove dirty worktrees (auto force)
+    let output = test_repo.agentree(&["remove", "--dirty"]);
+    assert!(
+        output.status.success(),
+        "remove --dirty should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("will-keep"),
+        "will-keep should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("will-remove-dirty"),
+        "will-remove-dirty should have been removed: {}",
+        stdout
+    );
+}
+
+// ─── --stale filter ───────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_stale_zero_days_shows_all() {
+    // --stale 0 means "not modified in the last 0 days" = everything qualifies
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "some-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "0", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --stale 0 should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("some-branch"),
+        "Should show some-branch with --stale 0: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_stale_large_threshold_shows_nothing() {
+    // --stale 99999 means "not modified in 99999 days" = nothing matches a freshly created worktree
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "fresh-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "99999", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --stale 99999 should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("fresh-branch"),
+        "fresh-branch should not appear with very large threshold: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_stale_default_value() {
+    // --stale without a value should default to 30 days (no error, just runs)
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "any-branch"]);
+
+    let output = test_repo.agentree(&["list", "--stale", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --stale (no value) should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ─── --branch pattern filter ─────────────────────────────────────────────────
+
+#[test]
+fn test_list_branch_pattern_filter() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "feature-one"]);
+    test_repo.agentree(&["create", "feature-two"]);
+    test_repo.agentree(&["create", "bugfix-one"]);
+
+    let output = test_repo.agentree(&["list", "--branch", "feature-*", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --branch should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("feature-one"), "Should show feature-one");
+    assert!(stdout.contains("feature-two"), "Should show feature-two");
+    assert!(
+        !stdout.contains("bugfix-one"),
+        "Should not show bugfix-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_branch_pattern_filter() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "wip-alpha"]);
+    test_repo.agentree(&["create", "wip-beta"]);
+    test_repo.agentree(&["create", "release-v1"]);
+
+    let output = test_repo.agentree(&["remove", "--branch", "wip-*"]);
+    assert!(
+        output.status.success(),
+        "remove --branch should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(!stdout.contains("wip-alpha"), "wip-alpha should be removed");
+    assert!(!stdout.contains("wip-beta"), "wip-beta should be removed");
+    assert!(
+        stdout.contains("release-v1"),
+        "release-v1 should still be present: {}",
+        stdout
+    );
+}
+
+// ─── --clean / --not-locked inverse filters ───────────────────────────────────
+
+#[test]
+fn test_list_clean_filter_shows_only_clean_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "clean-one"]);
+    test_repo.agentree(&["create", "dirty-one"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo.worktrees_dir().join(repo_name).join("dirty-one");
+    std::fs::write(dirty_path.join("change.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["list", "--clean"]);
+    assert!(output.status.success(), "list --clean should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("clean-one"), "Should show clean-one");
+    assert!(
+        !stdout.contains("dirty-one"),
+        "Should not show dirty-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_not_locked_filter_shows_only_unlocked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "free-one"]);
+    test_repo.agentree(&["create", "locked-one"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo.worktrees_dir().join(repo_name).join("locked-one");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    let output = test_repo.agentree(&["list", "--not-locked", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --not-locked should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("free-one"), "Should show free-one");
+    assert!(
+        !stdout.contains("locked-one"),
+        "Should not show locked-one: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_clean_filter_removes_clean_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "keep-dirty"]);
+    test_repo.agentree(&["create", "remove-clean"]);
+
+    // Make keep-dirty actually dirty
+    let repo_name = test_repo.path().file_name().unwrap();
+    let dirty_path = test_repo.worktrees_dir().join(repo_name).join("keep-dirty");
+    std::fs::write(dirty_path.join("work.txt"), "uncommitted").unwrap();
+
+    let output = test_repo.agentree(&["remove", "--clean"]);
+    assert!(
+        output.status.success(),
+        "remove --clean should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("keep-dirty"),
+        "keep-dirty should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("remove-clean"),
+        "remove-clean should have been removed: {}",
+        stdout
+    );
+}
+
+// ─── --locked filter ─────────────────────────────────────────────────────────
+
+#[test]
+fn test_list_locked_shows_only_locked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "free-branch"]);
+    test_repo.agentree(&["create", "locked-branch"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("locked-branch");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    let output = test_repo.agentree(&["list", "--locked", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("locked-branch"),
+        "Should show locked-branch: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("free-branch"),
+        "Should not show free-branch: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_locked_filter_removes_locked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "keep-branch"]);
+    test_repo.agentree(&["create", "to-remove-locked"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("to-remove-locked");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    // remove --locked should remove locked worktrees (auto-unlocks)
+    let output = test_repo.agentree(&["remove", "--locked"]);
+    assert!(
+        output.status.success(),
+        "remove --locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("keep-branch"),
+        "keep-branch should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("to-remove-locked"),
+        "to-remove-locked should have been removed: {}",
+        stdout
+    );
+}
+
+// ─── --not-merged filter ────────────────────────────────────────────────────
+
+#[test]
+fn test_list_not_merged_filters_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Use clearly distinct names (no substring overlap)
+    test_repo.agentree(&["create", "done-work"]);
+    test_repo.agentree(&["create", "active-work"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+
+    // Give active-work a unique commit so it is genuinely not merged
+    let active_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("active-work");
+    std::fs::write(active_path.join("active.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&active_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Active work"])
+        .current_dir(&active_path)
+        .output()
+        .unwrap();
+
+    // Commit something in done-work and merge it into main
+    let done_path = test_repo.worktrees_dir().join(repo_name).join("done-work");
+    std::fs::write(done_path.join("done.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&done_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Done work"])
+        .current_dir(&done_path)
+        .output()
+        .unwrap();
+    test_repo.git(&["merge", "--no-ff", "done-work", "-m", "Merge done-work"]);
+
+    // list --not-merged main should show only active-work
+    let output = test_repo.agentree(&["list", "--not-merged", "main", "--no-dirty-check"]);
+    assert!(
+        output.status.success(),
+        "list --not-merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("active-work"),
+        "Should show active-work: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("done-work"),
+        "Should not show done-work: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_not_merged_empty_message() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a branch and merge it — so there are NO unmerged worktrees
+    test_repo.agentree(&["create", "will-be-merged"]);
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("will-be-merged");
+    std::fs::write(wt_path.join("f.txt"), "x").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "feat"])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    test_repo.git(&["merge", "--no-ff", "will-be-merged", "-m", "Merge"]);
+
+    let output = test_repo.agentree(&["list", "--not-merged", "main", "--no-dirty-check"]);
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("No unmerged worktrees found for 'main'"),
+        "Should show targeted empty message: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_not_merged_removes_only_unmerged() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "merged-x"]);
+    test_repo.agentree(&["create", "unmerged-x"]);
+
+    let repo_name = test_repo.path().file_name().unwrap();
+
+    // Give unmerged-x a unique commit
+    let unmerged_path = test_repo.worktrees_dir().join(repo_name).join("unmerged-x");
+    std::fs::write(unmerged_path.join("u.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&unmerged_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged"])
+        .current_dir(&unmerged_path)
+        .output()
+        .unwrap();
+
+    // Merge merged-x into main
+    let merged_path = test_repo.worktrees_dir().join(repo_name).join("merged-x");
+    std::fs::write(merged_path.join("m.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&merged_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Merged"])
+        .current_dir(&merged_path)
+        .output()
+        .unwrap();
+    test_repo.git(&["merge", "--no-ff", "merged-x", "-m", "Merge"]);
+
+    // remove --not-merged main should remove only unmerged-x
+    let output = test_repo.agentree(&["remove", "--not-merged", "main"]);
+    assert!(
+        output.status.success(),
+        "remove --not-merged should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // merged-x should still exist
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        stdout.contains("merged-x"),
+        "merged-x should still be present: {}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("unmerged-x"),
+        "unmerged-x should have been removed: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_remove_not_locked_filter_removes_unlocked_worktrees() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    test_repo.agentree(&["create", "unlocked-wt"]);
+    test_repo.agentree(&["create", "locked-wt"]);
+
+    // Lock one worktree
+    let repo_name = test_repo.path().file_name().unwrap();
+    let locked_path = test_repo.worktrees_dir().join(repo_name).join("locked-wt");
+    test_repo.git(&["worktree", "lock", locked_path.to_str().unwrap()]);
+
+    // remove --not-locked should remove only the unlocked worktree
+    let output = test_repo.agentree(&["remove", "--not-locked"]);
+    assert!(
+        output.status.success(),
+        "remove --not-locked should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let list = test_repo.agentree(&["list", "--no-dirty-check"]);
+    let stdout = String::from_utf8_lossy(&list.stdout);
+    assert!(
+        !stdout.contains("unlocked-wt"),
+        "unlocked-wt should have been removed: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains("locked-wt"),
+        "locked-wt should still be present: {}",
+        stdout
+    );
+}
+
+#[test]
+fn test_list_merged_empty_message_uses_current_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree with its own commit so it is genuinely not merged
+    test_repo.agentree(&["create", "unmerged-for-sentinel"]);
+    let repo_name = test_repo.path().file_name().unwrap();
+    let wt_path = test_repo
+        .worktrees_dir()
+        .join(repo_name)
+        .join("unmerged-for-sentinel");
+    std::fs::write(wt_path.join("work.txt"), "content").unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["commit", "-m", "Unmerged work"])
+        .current_dir(&wt_path)
+        .output()
+        .unwrap();
+
+    // Get the current branch name (should be "main")
+    let branch_output = Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(test_repo.path())
+        .output()
+        .expect("git symbolic-ref should work");
+    let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+        .trim()
+        .to_string();
+
+    // Run list --merged without a value (sentinel HEAD should be resolved to current branch)
+    let output = test_repo.agentree(&["list", "--merged", "--no-dirty-check"]);
+    assert!(output.status.success(), "list --merged should succeed");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The empty message must NOT contain "HEAD" and MUST contain the branch name
+    assert!(
+        !stdout.contains("'HEAD'"),
+        "Empty message should not show HEAD sentinel: {}",
+        stdout
+    );
+    assert!(
+        stdout.contains(&current_branch),
+        "Empty message should show current branch '{}': {}",
+        current_branch,
+        stdout
+    );
 }

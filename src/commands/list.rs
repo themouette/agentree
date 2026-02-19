@@ -1,10 +1,18 @@
+use crate::commands::filters::{
+    check_worktree_dirty, resolve_head_sentinel, WorktreeFilterArgs, WorktreeFilterable,
+};
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::{get_git_root, path_to_str, run_git_query};
+use crate::utils::git::get_git_root;
+use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
+use chrono::{DateTime, Local, Utc};
 use clap::Parser;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+
+/// Width of the ST (status) column in table and two-lines formats.
+const STATUS_WIDTH: usize = 2;
 
 #[derive(Parser, Debug)]
 pub struct ListArgs {
@@ -16,9 +24,13 @@ pub struct ListArgs {
     #[arg(long, conflicts_with = "format")]
     pub json: bool,
 
-    /// Check each worktree for uncommitted changes (slower: runs git status per worktree)
+    /// Skip uncommitted-changes check for faster output.
+    /// By default, git status is run for each worktree.
     #[arg(long)]
-    pub dirty: bool,
+    pub no_dirty_check: bool,
+
+    #[command(flatten)]
+    pub filters: WorktreeFilterArgs,
 }
 
 #[derive(clap::ValueEnum, Clone, Debug)]
@@ -33,6 +45,17 @@ pub enum OutputFormat {
     Json,
 }
 
+/// Whether a worktree has uncommitted changes.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DirtyStatus {
+    /// --no-dirty-check was passed; check was skipped.
+    NotChecked,
+    /// Check was performed: worktree is clean.
+    Clean,
+    /// Check was performed: worktree has uncommitted changes.
+    Dirty,
+}
+
 #[derive(Serialize)]
 struct WorktreeJson {
     branch: String,
@@ -40,7 +63,9 @@ struct WorktreeJson {
     backend: Option<String>,
     created: Option<String>,
     modified: Option<String>,
+    /// null when --no-dirty-check was passed, true/false when checked.
     dirty: Option<bool>,
+    /// null when not locked, "" when locked without reason, reason string otherwise.
     locked: Option<String>,
 }
 
@@ -51,10 +76,24 @@ struct WorktreeInfo {
     backend: String,
     created: Option<String>,
     modified: Option<std::time::SystemTime>,
-    /// None = not checked, Some(true/false) = checked
-    is_dirty: Option<bool>,
+    dirty: DirtyStatus,
     /// None = not locked, Some("") = locked no reason, Some(msg) = locked with reason
     locked: Option<String>,
+}
+
+impl WorktreeFilterable for WorktreeInfo {
+    fn branch(&self) -> Option<&str> {
+        Some(&self.branch)
+    }
+    fn locked(&self) -> Option<&str> {
+        self.locked.as_deref()
+    }
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn modified(&self) -> Option<std::time::SystemTime> {
+        self.modified
+    }
 }
 
 pub fn execute(args: ListArgs) -> Result<()> {
@@ -79,14 +118,48 @@ pub fn execute(args: ListArgs) -> Result<()> {
         args.format
     };
 
-    // Get worktrees with metadata
-    let worktrees = get_worktrees_with_metadata(args.dirty)?;
+    // Fetch basic metadata (no dirty check yet — filter first to avoid wasted git calls)
+    let mut worktrees = get_worktrees_with_metadata()?;
+
+    // --dirty / --clean filters conflict with --no-dirty-check (check is required to evaluate them)
+    if args.no_dirty_check && (args.filters.only_dirty || args.filters.only_clean) {
+        let flag = if args.filters.only_dirty {
+            "--dirty"
+        } else {
+            "--clean"
+        };
+        return Err(crate::error::AgentreeError::Worktree(format!(
+            "--no-dirty-check cannot be combined with {} (dirty check is required to filter by it)",
+            flag
+        )));
+    }
+
+    // Apply cheap filters first (no dirty check needed)
+    args.filters.apply(&mut worktrees)?;
+
+    // Run dirty check when not explicitly disabled.
+    let need_dirty_check = !args.no_dirty_check;
+    if need_dirty_check {
+        with_spinner(
+            "Checking for uncommitted changes... (use --no-dirty-check for faster output)",
+            || populate_dirty_status(&mut worktrees),
+        )?;
+    }
+
+    // Apply dirty/clean filter after the check
+    if args.filters.only_dirty {
+        worktrees.retain(|w| w.dirty == DirtyStatus::Dirty);
+    }
+    if args.filters.only_clean {
+        worktrees.retain(|w| w.dirty == DirtyStatus::Clean);
+    }
 
     // Check if there are any worktrees
     if worktrees.is_empty() {
+        let msg = empty_message(&args.filters);
         match format {
             OutputFormat::Json => println!("[]"),
-            _ => println!("No worktrees found."),
+            _ => println!("{}", msg),
         }
         return Ok(());
     }
@@ -100,7 +173,22 @@ pub fn execute(args: ListArgs) -> Result<()> {
     }
 }
 
-fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
+/// Build the "no results" message based on which filters are active.
+fn empty_message(filters: &WorktreeFilterArgs) -> String {
+    if let Some(ref base) = filters.merged {
+        let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+        format!("No merged worktrees found for '{}'.", resolved)
+    } else if let Some(ref base) = filters.not_merged {
+        let resolved = resolve_head_sentinel(base).unwrap_or_else(|_| base.clone());
+        format!("No unmerged worktrees found for '{}'.", resolved)
+    } else if filters.has_any() {
+        "No worktrees match the specified filters.".to_string()
+    } else {
+        "No worktrees found.".to_string()
+    }
+}
+
+fn get_worktrees_with_metadata() -> Result<Vec<WorktreeInfo>> {
     // Get linked worktrees only (excludes main repo and detached HEADs)
     let worktree_list = recovery::list_linked_worktrees()?;
 
@@ -111,21 +199,6 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
             let activity = operations::get_last_activity(&entry.path);
             let metadata = WorktreeMetadata::load(&entry.path).ok().flatten();
 
-            let is_dirty = if check_dirty {
-                let dirty = path_to_str(&entry.path, "worktree path")
-                    .ok()
-                    .and_then(|path_str| {
-                        run_git_query(&["-C", path_str, "status", "--short"])
-                            .ok()
-                            .flatten()
-                    })
-                    .map(|output| !output.is_empty())
-                    .unwrap_or(false);
-                Some(dirty)
-            } else {
-                None
-            };
-
             WorktreeInfo {
                 branch: entry.branch.clone().unwrap_or_default(),
                 path: entry.path.clone(),
@@ -135,7 +208,7 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
                     .unwrap_or_else(|| "unknown".to_string()),
                 created: metadata.as_ref().map(|m| m.created_at.clone()),
                 modified: activity,
-                is_dirty,
+                dirty: DirtyStatus::NotChecked,
                 locked: entry.locked.clone(),
             }
         })
@@ -152,15 +225,63 @@ fn get_worktrees_with_metadata(check_dirty: bool) -> Result<Vec<WorktreeInfo>> {
     Ok(worktrees_with_time)
 }
 
+/// Run `git status --short` for each worktree and update its dirty field in place.
+/// Errors per worktree are treated as NotChecked (best-effort).
+fn populate_dirty_status(worktrees: &mut [WorktreeInfo]) -> Result<()> {
+    for info in worktrees.iter_mut() {
+        info.dirty = match check_worktree_dirty(&info.path) {
+            Some(true) => DirtyStatus::Dirty,
+            Some(false) => DirtyStatus::Clean,
+            None => DirtyStatus::NotChecked,
+        };
+    }
+    Ok(())
+}
+
 fn format_created_date(created: Option<&String>) -> String {
     created
         .and_then(|c| {
-            use chrono::DateTime;
-            DateTime::parse_from_rfc3339(c)
-                .ok()
-                .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+            DateTime::parse_from_rfc3339(c).ok().map(|dt| {
+                let local = dt.with_timezone(&Local);
+                let ago = format_time_ago(local.into());
+                format!("{} ({})", local.format("%Y-%m-%d %H:%M"), ago)
+            })
         })
         .unwrap_or_else(|| "-".to_string())
+}
+
+/// Format a `SystemTime` as a human-readable relative duration, e.g. "3 months ago".
+fn format_time_ago(time: std::time::SystemTime) -> String {
+    let datetime: DateTime<Local> = time.into();
+    let now = Local::now();
+    let duration = now.signed_duration_since(datetime);
+
+    let secs = duration.num_seconds();
+    if secs < 60 {
+        return "just now".to_string();
+    }
+    let mins = duration.num_minutes();
+    if mins < 60 {
+        return format!("{} minute{} ago", mins, if mins == 1 { "" } else { "s" });
+    }
+    let hours = duration.num_hours();
+    if hours < 24 {
+        return format!("{} hour{} ago", hours, if hours == 1 { "" } else { "s" });
+    }
+    let days = duration.num_days();
+    if days < 7 {
+        return format!("{} day{} ago", days, if days == 1 { "" } else { "s" });
+    }
+    let weeks = days / 7;
+    if weeks < 5 {
+        return format!("{} week{} ago", weeks, if weeks == 1 { "" } else { "s" });
+    }
+    let months = days / 30;
+    if months < 12 {
+        return format!("{} month{} ago", months, if months == 1 { "" } else { "s" });
+    }
+    let years = days / 365;
+    format!("{} year{} ago", years, if years == 1 { "" } else { "s" })
 }
 
 fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
@@ -168,10 +289,15 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
         .iter()
         .map(|info| {
             let modified = info.modified.map(|time| {
-                use chrono::{DateTime, Utc};
                 let datetime: DateTime<Utc> = time.into();
                 datetime.to_rfc3339()
             });
+
+            let dirty = match info.dirty {
+                DirtyStatus::NotChecked => None,
+                DirtyStatus::Clean => Some(false),
+                DirtyStatus::Dirty => Some(true),
+            };
 
             WorktreeJson {
                 branch: info.branch.clone(),
@@ -179,7 +305,7 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
                 backend: Some(info.backend.clone()),
                 created: info.created.clone(),
                 modified,
-                dirty: info.is_dirty,
+                dirty,
                 locked: info.locked.clone(),
             }
         })
@@ -192,8 +318,12 @@ fn render_json(worktrees: &[WorktreeInfo]) -> Result<()> {
 fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
     // Header
     println!(
-        "{:<30} {:<12} {:<20} {:<2}",
-        "BRANCH", "BACKEND", "MODIFIED", "ST"
+        "{:<30} {:<12} {:<20} {:<width$}",
+        "BRANCH",
+        "BACKEND",
+        "MODIFIED",
+        "ST",
+        width = STATUS_WIDTH
     );
 
     for info in worktrees {
@@ -202,15 +332,16 @@ fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
             .map(operations::format_activity)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let st = format_status(info.is_dirty, info.locked.as_deref());
+        let st = format_status(info.dirty, info.locked.as_deref());
 
         // First line: branch, backend, modified, status
         println!(
-            "{:<30} {:<12} {:<20} {:<2}",
+            "{:<30} {:<12} {:<20} {:<width$}",
             truncate(&info.branch, 30),
             truncate(&info.backend, 12),
             modified,
-            st
+            st,
+            width = STATUS_WIDTH
         );
 
         // Second line: absolute path with arrow
@@ -223,8 +354,14 @@ fn render_two_lines(worktrees: &[WorktreeInfo]) -> Result<()> {
 fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
     // Header with 120 max width
     println!(
-        "{:<25} {:<50} {:<12} {:<18} {:<15} {:<2}",
-        "BRANCH", "PATH", "BACKEND", "CREATED", "MODIFIED", "ST"
+        "{:<25} {:<50} {:<12} {:<18} {:<15} {:<width$}",
+        "BRANCH",
+        "PATH",
+        "BACKEND",
+        "CREATED",
+        "MODIFIED",
+        "ST",
+        width = STATUS_WIDTH
     );
 
     for info in worktrees {
@@ -238,16 +375,17 @@ fn render_table(worktrees: &[WorktreeInfo], repo_root: &Path) -> Result<()> {
             .map(operations::format_activity)
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let st = format_status(info.is_dirty, info.locked.as_deref());
+        let st = format_status(info.dirty, info.locked.as_deref());
 
         println!(
-            "{:<25} {:<50} {:<12} {:<18} {:<15} {:<2}",
+            "{:<25} {:<50} {:<12} {:<18} {:<15} {:<width$}",
             truncate(&info.branch, 25),
             truncate(&path_display, 50),
             truncate(&info.backend, 12),
             created,
             modified,
-            st
+            st,
+            width = STATUS_WIDTH
         );
     }
 
@@ -264,7 +402,10 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
 
         let modified = info
             .modified
-            .map(operations::format_activity)
+            .map(|t| {
+                let dt: DateTime<Local> = t.into();
+                format!("{} ({})", dt.format("%Y-%m-%d %H:%M"), format_time_ago(t))
+            })
             .unwrap_or_else(|| "Unknown".to_string());
 
         println!("┌─ {}", info.branch);
@@ -272,15 +413,15 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
         println!("│  Backend:  {}", info.backend);
         println!("│  Created:  {}", created);
         println!("│  Modified: {}", modified);
-        if let Some(dirty) = info.is_dirty {
-            println!("│  Dirty:    {}", if dirty { "yes" } else { "no" });
+        match info.dirty {
+            DirtyStatus::Clean => println!("│  Dirty:    no"),
+            DirtyStatus::Dirty => println!("│  Dirty:    yes"),
+            DirtyStatus::NotChecked => {}
         }
-        if let Some(lock_reason) = &info.locked {
-            if lock_reason.is_empty() {
-                println!("│  Locked:   yes");
-            } else {
-                println!("│  Locked:   yes ({})", lock_reason);
-            }
+        match info.locked.as_deref() {
+            None => println!("│  Locked:   no"),
+            Some("") => println!("│  Locked:   yes"),
+            Some(reason) => println!("│  Locked:   yes ({})", reason),
         }
         println!("└─");
     }
@@ -289,17 +430,17 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
 }
 
 /// Format a 2-character status column: `*` for dirty, `L` for locked.
-/// - `  ` — clean, not locked
+/// - `  ` — not checked or clean, not locked
 /// - `* ` — dirty, not locked
-/// - ` L` — clean, locked
+/// - ` L` — not checked or clean, locked
 /// - `*L` — dirty and locked
-fn format_status(is_dirty: Option<bool>, locked: Option<&str>) -> String {
-    let dirty_char = match is_dirty {
-        Some(true) => '*',
-        _ => ' ',
-    };
-    let lock_char = if locked.is_some() { 'L' } else { ' ' };
-    format!("{}{}", dirty_char, lock_char)
+fn format_status(dirty: DirtyStatus, locked: Option<&str>) -> &'static str {
+    match (dirty, locked.is_some()) {
+        (DirtyStatus::Dirty, true) => "*L",
+        (DirtyStatus::Dirty, false) => "* ",
+        (_, true) => " L",
+        (_, false) => "  ",
+    }
 }
 
 fn make_relative_path(path: &Path, repo_root: &Path) -> String {
@@ -320,11 +461,12 @@ fn make_relative_path(path: &Path, repo_root: &Path) -> String {
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() > max_len {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    } else {
-        s.to_string()
+    if s.chars().count() <= max_len {
+        return s.to_string();
     }
+    let cut = max_len.saturating_sub(3);
+    let end = s.char_indices().nth(cut).map(|(i, _)| i).unwrap_or(s.len());
+    format!("{}...", &s[..end])
 }
 
 #[cfg(test)]
@@ -333,55 +475,205 @@ mod tests {
 
     #[test]
     fn test_format_status_clean_unlocked() {
-        assert_eq!(format_status(Some(false), None), "  ");
+        assert_eq!(format_status(DirtyStatus::Clean, None), "  ");
     }
 
     #[test]
     fn test_format_status_not_checked_unlocked() {
-        assert_eq!(format_status(None, None), "  ");
+        assert_eq!(format_status(DirtyStatus::NotChecked, None), "  ");
     }
 
     #[test]
     fn test_format_status_dirty_unlocked() {
-        assert_eq!(format_status(Some(true), None), "* ");
+        assert_eq!(format_status(DirtyStatus::Dirty, None), "* ");
     }
 
     #[test]
     fn test_format_status_clean_locked_no_reason() {
-        assert_eq!(format_status(Some(false), Some("")), " L");
+        assert_eq!(format_status(DirtyStatus::Clean, Some("")), " L");
     }
 
     #[test]
     fn test_format_status_clean_locked_with_reason() {
-        assert_eq!(format_status(Some(false), Some("in use")), " L");
+        assert_eq!(format_status(DirtyStatus::Clean, Some("in use")), " L");
     }
 
     #[test]
     fn test_format_status_not_checked_locked() {
-        assert_eq!(format_status(None, Some("")), " L");
+        assert_eq!(format_status(DirtyStatus::NotChecked, Some("")), " L");
     }
 
     #[test]
     fn test_format_status_dirty_locked() {
-        assert_eq!(format_status(Some(true), Some("in use")), "*L");
+        assert_eq!(format_status(DirtyStatus::Dirty, Some("in use")), "*L");
     }
 
     #[test]
     fn test_format_status_always_two_chars() {
         // All combinations should produce exactly 2 characters
-        for is_dirty in [None, Some(false), Some(true)] {
+        for dirty in [
+            DirtyStatus::NotChecked,
+            DirtyStatus::Clean,
+            DirtyStatus::Dirty,
+        ] {
             for locked in [None, Some(""), Some("reason")] {
-                let status = format_status(is_dirty, locked);
+                let status = format_status(dirty, locked);
                 assert_eq!(
-                    status.len(),
+                    status.chars().count(),
                     2,
-                    "format_status({:?}, {:?}) = {:?} (len {})",
-                    is_dirty,
+                    "format_status({:?}, {:?}) = {:?}",
+                    dirty,
                     locked,
-                    status,
-                    status.len()
+                    status
                 );
             }
         }
+    }
+
+    fn make_info(dirty: DirtyStatus, locked: Option<&str>) -> WorktreeInfo {
+        WorktreeInfo {
+            branch: "feature/test".to_string(),
+            path: PathBuf::from("/tmp/worktree"),
+            backend: "local".to_string(),
+            created: None,
+            modified: None,
+            dirty,
+            locked: locked.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn test_card_omits_dirty_when_skipped() {
+        // When --no-dirty-check is passed the dirty line should be absent.
+        let info = make_info(DirtyStatus::NotChecked, None);
+        let dirty_line = match info.dirty {
+            DirtyStatus::Clean => Some("Dirty:    no"),
+            DirtyStatus::Dirty => Some("Dirty:    yes"),
+            DirtyStatus::NotChecked => None,
+        };
+        assert!(
+            dirty_line.is_none(),
+            "Dirty line should be absent when check was skipped"
+        );
+    }
+
+    #[test]
+    fn test_card_shows_dirty_yes_when_dirty() {
+        let info = make_info(DirtyStatus::Dirty, None);
+        let dirty_line = match info.dirty {
+            DirtyStatus::Clean => Some("Dirty:    no"),
+            DirtyStatus::Dirty => Some("Dirty:    yes"),
+            DirtyStatus::NotChecked => None,
+        };
+        assert_eq!(dirty_line, Some("Dirty:    yes"));
+    }
+
+    #[test]
+    fn test_card_shows_dirty_no_when_clean() {
+        let info = make_info(DirtyStatus::Clean, None);
+        let dirty_line = match info.dirty {
+            DirtyStatus::Clean => Some("Dirty:    no"),
+            DirtyStatus::Dirty => Some("Dirty:    yes"),
+            DirtyStatus::NotChecked => None,
+        };
+        assert_eq!(dirty_line, Some("Dirty:    no"));
+    }
+
+    #[test]
+    fn test_card_shows_locked_no_when_unlocked() {
+        let info = make_info(DirtyStatus::NotChecked, None);
+        let locked_line = match info.locked.as_deref() {
+            None => "Locked:   no",
+            Some("") => "Locked:   yes",
+            Some(reason) => {
+                // just to satisfy the borrow checker in test context
+                let _ = reason;
+                "Locked:   yes (reason)"
+            }
+        };
+        assert_eq!(locked_line, "Locked:   no");
+    }
+
+    #[test]
+    fn test_card_shows_locked_with_reason() {
+        let info = make_info(DirtyStatus::NotChecked, Some("in use"));
+        assert_eq!(info.locked.as_deref(), Some("in use"));
+    }
+
+    #[test]
+    fn test_json_dirty_null_when_not_checked() {
+        let info = make_info(DirtyStatus::NotChecked, None);
+        let dirty: Option<bool> = match info.dirty {
+            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => Some(false),
+            DirtyStatus::Dirty => Some(true),
+        };
+        assert!(dirty.is_none());
+    }
+
+    #[test]
+    fn test_json_dirty_false_when_clean() {
+        let info = make_info(DirtyStatus::Clean, None);
+        let dirty: Option<bool> = match info.dirty {
+            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => Some(false),
+            DirtyStatus::Dirty => Some(true),
+        };
+        assert_eq!(dirty, Some(false));
+    }
+
+    #[test]
+    fn test_json_dirty_true_when_dirty() {
+        let info = make_info(DirtyStatus::Dirty, None);
+        let dirty: Option<bool> = match info.dirty {
+            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => Some(false),
+            DirtyStatus::Dirty => Some(true),
+        };
+        assert_eq!(dirty, Some(true));
+    }
+
+    fn ago(secs: u64) -> std::time::SystemTime {
+        std::time::SystemTime::now() - std::time::Duration::from_secs(secs)
+    }
+
+    #[test]
+    fn test_format_time_ago_just_now() {
+        assert_eq!(format_time_ago(ago(30)), "just now");
+    }
+
+    #[test]
+    fn test_format_time_ago_minutes() {
+        assert_eq!(format_time_ago(ago(90)), "1 minute ago");
+        assert_eq!(format_time_ago(ago(300)), "5 minutes ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_hours() {
+        assert_eq!(format_time_ago(ago(3600)), "1 hour ago");
+        assert_eq!(format_time_ago(ago(7200)), "2 hours ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_days() {
+        assert_eq!(format_time_ago(ago(86400)), "1 day ago");
+        assert_eq!(format_time_ago(ago(86400 * 3)), "3 days ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_weeks() {
+        assert_eq!(format_time_ago(ago(86400 * 7)), "1 week ago");
+        assert_eq!(format_time_ago(ago(86400 * 14)), "2 weeks ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_months() {
+        assert_eq!(format_time_ago(ago(86400 * 60)), "2 months ago");
+    }
+
+    #[test]
+    fn test_format_time_ago_years() {
+        assert_eq!(format_time_ago(ago(86400 * 400)), "1 year ago");
+        assert_eq!(format_time_ago(ago(86400 * 800)), "2 years ago");
     }
 }

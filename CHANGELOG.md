@@ -47,17 +47,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `list` command now shows locked worktree status in all formats (always visible, free — data
-  comes from the existing `git worktree list --porcelain` call):
-  - **card**: `Locked: yes` or `Locked: yes (<reason>)` line added to each card
-  - **table / two-lines**: `ST` column with `L` symbol when locked
-- New `--dirty` flag for `list` command: runs `git status --short` per worktree and shows
-  uncommitted-changes indicator (opt-in because it adds one git call per worktree):
-  - **card**: `Dirty: yes/no` line added to each card
-  - **table / two-lines**: `*` symbol in the `ST` column when dirty
-  - **json**: `dirty` field is `null` when not requested, `true`/`false` when `--dirty` is used;
-    `locked` field is always present (`null` or the lock reason string)
-  - Errors during the status check (e.g. missing path) are treated as clean and do not abort the list
+- `list` command now shows dirty and locked status in all formats:
+  - **card**: `Dirty: yes/no` and `Locked: yes [reason]` lines added to each card
+  - **table / two-lines**: `ST` column — `*` for dirty, `L` for locked, `*L` for both
+  - **json**: `dirty` (`true`/`false`, or `null` when skipped) and `locked` fields always present
+  - Dirty check runs `git status --short` per worktree with a progress spinner; errors (e.g.
+    missing path) are treated as `NotChecked` and do not abort the list
+  - Locked status is free — data comes from the existing `git worktree list --porcelain` call
+- New `--no-dirty-check` flag for `list` command: skips the per-worktree `git status` calls for
+  faster output (useful for large repos or scripts where dirty status is not needed)
+- `remove --dry-run` flag to preview what would be removed without making any changes:
+  - Works with explicit branches (`agentree remove --dry-run feat-x`) and all filter flags
+  - Prints "Would remove N worktrees:" with each candidate branch and path
+  - Exits successfully without touching git metadata or the filesystem
+  - Most useful combined with filter flags: `agentree remove --dry-run --merged main`
+- Filter flags for both `list` and `remove` commands to select worktrees by status:
+  - `--merged [BASE]` — only worktrees whose branch is merged into BASE (defaults to current branch)
+  - `--not-merged [BASE]` — inverse of `--merged`
+  - `--dirty` — only worktrees with uncommitted changes (implies dirty check; conflicts with `--no-dirty-check`)
+  - `--clean` — only worktrees with no uncommitted changes (implies dirty check; conflicts with `--no-dirty-check`)
+  - `--locked` — only locked worktrees
+  - `--not-locked` — only unlocked worktrees
+  - `--branch PATTERN` — only branches matching a glob pattern (`*` and `?` wildcards supported)
+  - `--stale [DAYS]` — only worktrees not modified in the last DAYS days (default: 30)
+  - Filters combine (AND logic); e.g. `agentree rm --merged main --clean` removes only merged, clean worktrees
+  - For `remove`: `--dirty` automatically escalates to `IgnoreDirty` force level; `--locked` automatically unlocks
 - `agentree cd <branch>` now warns on stderr when the requested branch is
   checked out in the main repository rather than in a dedicated worktree (git
   forbids the same branch from being checked out in two places). Two variants:
