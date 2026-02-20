@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `agentree remove` (and `remove --unlock`) no longer times out after 30 seconds on
+  slow filesystems or locked worktrees. `git worktree remove` and `git worktree unlock`
+  are now run without a timeout, matching the treatment already applied to
+  `git worktree add`.
+- Card view (`--format card`) now always shows the `Dirty` field. Previously the line
+  was silently omitted when the dirty check was skipped (`--no-dirty-check`) or when the
+  check failed (e.g. after an interrupted removal leaves the worktree in an inconsistent
+  state). It now displays `?` in those cases so the unknown state is visible.
+
 ## [0.7.0] - 2026-02-19
 
 ### Changed
