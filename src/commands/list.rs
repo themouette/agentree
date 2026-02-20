@@ -416,7 +416,7 @@ fn render_card(worktrees: &[WorktreeInfo]) -> Result<()> {
         match info.dirty {
             DirtyStatus::Clean => println!("│  Dirty:    no"),
             DirtyStatus::Dirty => println!("│  Dirty:    yes"),
-            DirtyStatus::NotChecked => {}
+            DirtyStatus::NotChecked => println!("│  Dirty:    ?"),
         }
         match info.locked.as_deref() {
             None => println!("│  Locked:   no"),
@@ -543,40 +543,37 @@ mod tests {
     }
 
     #[test]
-    fn test_card_omits_dirty_when_skipped() {
-        // When --no-dirty-check is passed the dirty line should be absent.
+    fn test_card_shows_dirty_unknown_when_skipped() {
+        // When --no-dirty-check is passed (or check failed) the dirty line shows "?".
         let info = make_info(DirtyStatus::NotChecked, None);
         let dirty_line = match info.dirty {
-            DirtyStatus::Clean => Some("Dirty:    no"),
-            DirtyStatus::Dirty => Some("Dirty:    yes"),
-            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => "Dirty:    no",
+            DirtyStatus::Dirty => "Dirty:    yes",
+            DirtyStatus::NotChecked => "Dirty:    ?",
         };
-        assert!(
-            dirty_line.is_none(),
-            "Dirty line should be absent when check was skipped"
-        );
+        assert_eq!(dirty_line, "Dirty:    ?");
     }
 
     #[test]
     fn test_card_shows_dirty_yes_when_dirty() {
         let info = make_info(DirtyStatus::Dirty, None);
         let dirty_line = match info.dirty {
-            DirtyStatus::Clean => Some("Dirty:    no"),
-            DirtyStatus::Dirty => Some("Dirty:    yes"),
-            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => "Dirty:    no",
+            DirtyStatus::Dirty => "Dirty:    yes",
+            DirtyStatus::NotChecked => "Dirty:    ?",
         };
-        assert_eq!(dirty_line, Some("Dirty:    yes"));
+        assert_eq!(dirty_line, "Dirty:    yes");
     }
 
     #[test]
     fn test_card_shows_dirty_no_when_clean() {
         let info = make_info(DirtyStatus::Clean, None);
         let dirty_line = match info.dirty {
-            DirtyStatus::Clean => Some("Dirty:    no"),
-            DirtyStatus::Dirty => Some("Dirty:    yes"),
-            DirtyStatus::NotChecked => None,
+            DirtyStatus::Clean => "Dirty:    no",
+            DirtyStatus::Dirty => "Dirty:    yes",
+            DirtyStatus::NotChecked => "Dirty:    ?",
         };
-        assert_eq!(dirty_line, Some("Dirty:    no"));
+        assert_eq!(dirty_line, "Dirty:    no");
     }
 
     #[test]

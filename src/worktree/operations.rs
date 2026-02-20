@@ -352,7 +352,7 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
 
     // If unlock flag is set, try to unlock first
     if unlock {
-        match run_git_command(&["worktree", "unlock", path_str], "unlock worktree") {
+        match run_git_command_no_timeout(&["worktree", "unlock", path_str], "unlock worktree") {
             Ok(_) => {
                 eprintln!("Unlocked worktree for branch '{}'", branch);
             }
@@ -379,7 +379,7 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
     args.push(path_str);
 
     // Try to remove the worktree
-    match run_git_command(&args, "remove worktree") {
+    match run_git_command_no_timeout(&args, "remove worktree") {
         Ok(_) => Ok(()),
         Err(e) => {
             // Parse the error to provide helpful guidance
