@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-02-26
+
 ### Added
 
 - `agentree create <branch>` now detects branches that exist only on a remote
@@ -267,7 +269,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI/CD workflows for automated testing and releases
 - Install script for easy installation
 
-[Unreleased]: https://github.com/themouette/agentree/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/themouette/agentree/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/themouette/agentree/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/themouette/agentree/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/themouette/agentree/compare/v0.1.0...v0.7.0
 [0.1.0]: https://github.com/themouette/agentree/releases/tag/v0.1.0
