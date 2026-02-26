@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `agentree create <branch>` now detects branches that exist only on a remote
+  (e.g. pushed by a teammate but never fetched locally). Previously agentree
+  would silently create a new disconnected branch from HEAD. It now recognises
+  the remote tracking ref and uses git DWIM to check out a proper local
+  tracking branch, reporting `"Checked out '<branch>' from remote and created
+  worktree at <path>"`.
+- Typo suggestions for `--base` now include remote tracking branches (e.g.
+  `origin/main`) in addition to local ones, making it easier to correct
+  mistyped remote refs.
+
+### Fixed
+
+- Creating a worktree on a repository with no commits now fails immediately
+  with a clear, actionable error instead of a cryptic
+  `"ambiguous argument 'HEAD': unknown revision"` git message.
+- Common `git worktree add` failures (branch already checked out elsewhere,
+  path already exists, invalid ref) are now translated to actionable error
+  messages with remediation hints instead of raw git stderr.
+
 ## [0.7.1] - 2026-02-20
 
 ### Fixed

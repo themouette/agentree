@@ -411,6 +411,67 @@ pub fn list_local_branches() -> Result<Vec<String>> {
         .collect())
 }
 
+/// List all remote tracking branches in the repository.
+///
+/// # Returns
+/// Branch names in "remote/branch" format (e.g., "origin/main").
+/// Excludes remote HEAD pointers (e.g., "origin/HEAD").
+///
+/// # Example
+/// ```ignore
+/// let branches = list_remote_branches()?;
+/// // Returns: ["origin/main", "origin/feature"]
+/// ```
+pub fn list_remote_branches() -> Result<Vec<String>> {
+    let output = run_git_command(
+        &["branch", "--remote", "--format=%(refname:short)"],
+        "list remote branches",
+    )?;
+
+    Ok(output
+        .lines()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && !s.ends_with("/HEAD"))
+        .collect())
+}
+
+/// Find the first remote tracking ref for a local branch name.
+///
+/// Checks configured remotes in order and returns the first match.
+/// Returns the short ref name (e.g., "origin/feature") if found on any remote.
+///
+/// # Arguments
+/// * `branch` - The local branch name to look up (e.g., "feature")
+///
+/// # Returns
+/// `Some("origin/feature")` if found on any remote, `None` otherwise.
+///
+/// # Example
+/// ```ignore
+/// if let Some(remote_ref) = find_remote_tracking_ref("feature")? {
+///     println!("Found on remote: {}", remote_ref); // "origin/feature"
+/// }
+/// ```
+pub fn find_remote_tracking_ref(branch: &str) -> Result<Option<String>> {
+    let remotes_str = match run_git_query(&["remote"])? {
+        None => return Ok(None),
+        Some(s) => s,
+    };
+
+    for remote in remotes_str.lines() {
+        let remote = remote.trim();
+        if remote.is_empty() {
+            continue;
+        }
+        let remote_ref = format!("refs/remotes/{}/{}", remote, branch);
+        if run_git_query(&["show-ref", "--verify", "--quiet", &remote_ref])?.is_some() {
+            return Ok(Some(format!("{}/{}", remote, branch)));
+        }
+    }
+
+    Ok(None)
+}
+
 /// Suggest similar branch names based on Levenshtein distance.
 ///
 /// Returns up to 3 branch names with edit distance <= max_distance,
@@ -491,8 +552,12 @@ pub fn validate_start_ref(ref_name: &str) -> Result<()> {
         return Ok(());
     }
 
-    // Ref doesn't exist - suggest similar branch names
-    let branches = list_local_branches()?;
+    // Ref doesn't exist - suggest similar branch names (local + remote)
+    let mut branches = list_local_branches()?;
+    // Include remote tracking branches so users get suggestions like "origin/feature"
+    if let Ok(remote_branches) = list_remote_branches() {
+        branches.extend(remote_branches);
+    }
     let suggestions = suggest_similar_branches(ref_name, &branches, 3);
 
     if !suggestions.is_empty() {

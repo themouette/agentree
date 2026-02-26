@@ -36,6 +36,10 @@ pub fn execute(args: CreateArgs) -> Result<()> {
     let msg = match &status {
         BranchStatus::DoesNotExist => format!("Creating branch '{}' and worktree...", branch),
         BranchStatus::ExistsNotCheckedOut => format!("Creating worktree for '{}'...", branch),
+        BranchStatus::ExistsOnRemote(remote_ref) => format!(
+            "Checking out '{}' from '{}' and creating worktree...",
+            branch, remote_ref
+        ),
         BranchStatus::InWorktree(_) => unreachable!(),
     };
 
