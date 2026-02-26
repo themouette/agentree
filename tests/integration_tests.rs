@@ -2762,3 +2762,103 @@ fn test_create_fails_on_empty_repository() {
         stderr
     );
 }
+
+/// Test that removing the main branch (i.e. the main repo checkout) is refused
+/// with a clear, actionable error instead of a raw git message.
+#[test]
+fn test_remove_main_repo_branch_is_refused() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Attempt to remove the branch that the main repo is checked out on
+    let output = test_repo.agentree(&["remove", "main"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail when targeting the main repo branch"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("main repository") || stderr.contains("linked worktrees"),
+        "Error should explain that only linked worktrees can be removed: {}",
+        stderr
+    );
+}
+
+/// Test that removing multiple branches continues past individual failures
+/// (missing branch) and reports the successes.
+#[test]
+fn test_remove_multiple_branches_continues_on_missing() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for branch-a but NOT for branch-b
+    let create_out = test_repo.agentree(&["create", "branch-a"]);
+    assert!(
+        create_out.status.success(),
+        "create branch-a should succeed: {}",
+        String::from_utf8_lossy(&create_out.stderr)
+    );
+
+    // Remove both: branch-a exists, branch-b does not
+    let output = test_repo.agentree(&["remove", "branch-a", "branch-b"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // branch-a should have been removed
+    assert!(
+        stdout.contains("Removed") && stdout.contains("branch-a"),
+        "Should report branch-a removed: stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+
+    // branch-b failure should appear in stderr
+    assert!(
+        stderr.contains("branch-b"),
+        "Should warn about branch-b failure: stderr={}",
+        stderr
+    );
+}
+
+/// Test that the command exits zero when at least one branch was removed,
+/// even if other branches were not found.
+#[test]
+fn test_remove_multiple_branches_partial_success_exits_zero() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for branch-ok but NOT for branch-missing
+    let create_out = test_repo.agentree(&["create", "branch-ok"]);
+    assert!(
+        create_out.status.success(),
+        "create branch-ok should succeed: {}",
+        String::from_utf8_lossy(&create_out.stderr)
+    );
+
+    let output = test_repo.agentree(&["remove", "branch-ok", "branch-missing"]);
+
+    assert!(
+        output.status.success(),
+        "remove should exit 0 when at least one branch was removed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Test that removing a completely nonexistent branch exits with a non-zero status.
+#[test]
+fn test_remove_nonexistent_all_fail_exits_nonzero() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["remove", "nonexistent-branch-xyz"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail when no branches were removed"
+    );
+}

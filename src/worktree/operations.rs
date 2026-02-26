@@ -385,16 +385,22 @@ pub fn create_worktree(
 /// Delete a worktree by branch name
 ///
 /// This removes the worktree directory and updates git metadata, but preserves the branch.
+/// Returns the path of the removed worktree so callers can use it for cleanup.
 ///
 /// # Arguments
 /// * `branch` - Branch name to remove
 /// * `force_level` - How aggressively to remove (None/IgnoreDirty/IgnoreLocked)
 /// * `unlock` - If true, attempt to unlock the worktree before removing
-pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> Result<()> {
+pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> Result<PathBuf> {
     // Validate branch name first
     validation::validate_branch_name(branch)?;
 
     let worktrees = ensure_clean_state()?;
+
+    // Guard: the first entry is always the main working tree — never remove it.
+    let main_is_this = worktrees
+        .first()
+        .is_some_and(|main| main.branch.as_deref() == Some(branch));
 
     // Find worktree by branch
     let worktree = worktrees
@@ -404,11 +410,28 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
             branch: branch.to_string(),
         })?;
 
-    let path_str = crate::utils::git::path_to_str(&worktree.path, "worktree path")?;
+    // Refuse to remove the main repository checkout
+    if main_is_this
+        || worktrees
+            .first()
+            .is_some_and(|main| main.path == worktree.path)
+    {
+        return Err(AgentreeError::Worktree(format!(
+            "Cannot remove the main repository checkout for branch '{}'.\n\
+             Only linked worktrees can be removed.\n\
+             To switch the main repo to a different branch:\n\
+               git checkout <other-branch>",
+            branch
+        )));
+    }
+
+    let path = worktree.path.clone();
+    // Obtain an owned string so we can move `path` freely after the git call
+    let path_str = crate::utils::git::path_to_str(&path, "worktree path")?.to_string();
 
     // If unlock flag is set, try to unlock first
     if unlock {
-        match run_git_command_no_timeout(&["worktree", "unlock", path_str], "unlock worktree") {
+        match run_git_command_no_timeout(&["worktree", "unlock", &path_str], "unlock worktree") {
             Ok(_) => {
                 eprintln!("Unlocked worktree for branch '{}'", branch);
             }
@@ -432,16 +455,32 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
     #[allow(clippy::manual_repeat_n)]
     args.extend(std::iter::repeat("--force").take(force_level.flag_count()));
 
-    args.push(path_str);
+    args.push(&path_str);
 
     // Try to remove the worktree
     match run_git_command_no_timeout(&args, "remove worktree") {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(path),
         Err(e) => {
             // Parse the error to provide helpful guidance
             let error_msg = e.to_string();
 
-            if error_msg.contains("locked working tree") {
+            if error_msg.contains("contains the current working directory") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove worktree for '{}': your shell is currently inside it.\n\
+                     Navigate away first, then retry:\n\
+                       agentree cd        # return to main repository\n\
+                       agentree remove {}",
+                    branch, branch
+                )))
+            } else if error_msg.contains("is a main working tree") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove the main repository checkout for branch '{}'.\n\
+                     Only linked worktrees can be removed.\n\
+                     To switch the main repo to a different branch:\n\
+                       git checkout <other-branch>",
+                    branch
+                )))
+            } else if error_msg.contains("locked working tree") {
                 Err(AgentreeError::Worktree(format!(
                     r#"Cannot remove locked worktree for branch '{branch}'.
 
@@ -471,6 +510,18 @@ To fix this, try one of these options:
 3. Stash changes: cd "{path}" && git stash"#,
                     branch = branch,
                     path = path_str
+                )))
+            } else if error_msg.contains("Permission denied")
+                || error_msg.contains("permission denied")
+            {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove worktree for '{}': permission denied.\n\
+                     Location: {}\n\n\
+                     Fix directory permissions:\n\
+                       chmod -R u+w \"{}\"\n\
+                     Or remove manually with elevated privileges:\n\
+                       sudo rm -rf \"{}\"",
+                    branch, path_str, path_str, path_str
                 )))
             } else {
                 // Return the original error if we can't provide specific guidance
@@ -552,7 +603,10 @@ fn has_commits() -> Result<bool> {
 /// Git's error messages are often terse. This function maps the most common
 /// failure patterns to clearer, user-friendly alternatives while keeping
 /// the original error as context.
-fn improve_worktree_add_error(err: crate::error::AgentreeError, branch: &str) -> crate::error::AgentreeError {
+fn improve_worktree_add_error(
+    err: crate::error::AgentreeError,
+    branch: &str,
+) -> crate::error::AgentreeError {
     let msg = err.to_string();
 
     if msg.contains("already checked out") || msg.contains("is already checked out") {
@@ -563,10 +617,11 @@ fn improve_worktree_add_error(err: crate::error::AgentreeError, branch: &str) ->
     }
 
     if msg.contains("already exists") {
-        return AgentreeError::Worktree(format!(
+        return AgentreeError::Worktree(
             "Worktree path already exists and is not managed by git.\n\
              Run `agentree doctor` to detect and fix orphaned directories."
-        ));
+                .to_string(),
+        );
     }
 
     if msg.contains("is not a valid branch name") || msg.contains("not a valid object name") {
@@ -577,10 +632,11 @@ fn improve_worktree_add_error(err: crate::error::AgentreeError, branch: &str) ->
     }
 
     if msg.contains("is not a commit") {
-        return AgentreeError::Worktree(format!(
+        return AgentreeError::Worktree(
             "Cannot create worktree: the specified ref does not point to a commit.\n\
              Check the ref with: `git rev-parse <ref>`"
-        ));
+                .to_string(),
+        );
     }
 
     // Return original error unchanged if we cannot provide better guidance
