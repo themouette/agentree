@@ -63,10 +63,22 @@ pub fn ensure_workspace_with_progress(
     match status {
         BranchStatus::InWorktree(_) => ensure_workspace(config, repo_root, branch, base),
         BranchStatus::ExistsNotCheckedOut => {
+            if let Some(ref_name) = base {
+                eprintln!(
+                    "Warning: '-b {}' ignored — branch '{}' already exists.",
+                    ref_name, branch
+                );
+            }
             let msg = format!("Creating worktree for '{}'...", branch);
             with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))
         }
         BranchStatus::ExistsOnRemote(ref remote_ref) => {
+            if let Some(ref_name) = base {
+                eprintln!(
+                    "Warning: '-b {}' ignored — branch '{}' already exists on remote ('{}').",
+                    ref_name, branch, remote_ref
+                );
+            }
             let msg = format!(
                 "Checking out '{}' from '{}' and creating worktree...",
                 branch, remote_ref
