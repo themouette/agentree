@@ -170,6 +170,11 @@ impl TestRepo {
         &self.repo_path
     }
 
+    /// Get the path to the isolated global gitconfig used by all git/agentree calls
+    pub fn global_gitconfig_path(&self) -> &std::path::Path {
+        &self.global_gitconfig
+    }
+
     /// Get the expected worktrees directory path
     pub fn worktrees_dir(&self) -> PathBuf {
         self.temp_dir.path().join("worktrees")

@@ -554,7 +554,8 @@ pub fn validate_start_ref(ref_name: &str) -> Result<()> {
 
     // Ref doesn't exist - suggest similar branch names (local + remote)
     let mut branches = list_local_branches()?;
-    // Include remote tracking branches so users get suggestions like "origin/feature"
+    // Include remote tracking branches so users get suggestions like "origin/feature".
+    // Failure to list remotes is non-fatal: omit remote suggestions rather than blocking.
     if let Ok(remote_branches) = list_remote_branches() {
         branches.extend(remote_branches);
     }

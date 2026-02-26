@@ -2717,10 +2717,7 @@ fn test_create_fails_on_empty_repository() {
     Command::new("git")
         .args(["init"])
         .current_dir(&repo_path)
-        .env(
-            "GIT_CONFIG_GLOBAL",
-            repo_path.parent().unwrap().join("global.gitconfig"),
-        )
+        .env("GIT_CONFIG_GLOBAL", test_repo.global_gitconfig_path())
         .output()
         .expect("Failed to init git repo");
     Command::new("git")

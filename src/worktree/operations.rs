@@ -311,8 +311,12 @@ pub fn create_worktree(
             // Branch already has a worktree - return existing path
             Ok(CreateResult::Resumed(path))
         }
-        BranchStatus::ExistsNotCheckedOut => {
-            // Branch exists locally, check it out in a new worktree
+        status @ (BranchStatus::ExistsNotCheckedOut | BranchStatus::ExistsOnRemote(_)) => {
+            // Both cases use the same git DWIM command: no -b flag lets git resolve the
+            // branch as either a local ref or a remote-tracking branch transparently.
+            // We only differ in the CreateResult variant returned to the caller.
+            let is_remote_checkout = matches!(status, BranchStatus::ExistsOnRemote(_));
+
             let short_hash = get_short_hash()?;
             let repo_name = repo_root
                 .file_name()
@@ -321,36 +325,18 @@ pub fn create_worktree(
             let context = TemplateContext::new(repo_name, branch, &short_hash);
             let worktree_path = compute_worktree_path(config, repo_root, &context)?;
 
-            // Clean up orphaned directory if it exists (from previous pruned worktree)
+            // Clean up orphaned directory if it exists (from a previous pruned worktree)
             remove_orphaned_directory(&worktree_path)?;
 
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
             run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
 
-            Ok(CreateResult::Created(worktree_path))
-        }
-        BranchStatus::ExistsOnRemote(_remote_ref) => {
-            // Branch exists on a remote but not locally.
-            // Use git DWIM: `git worktree add /path branch` without `-b` lets git
-            // detect the remote tracking branch and create a local tracking branch.
-            let short_hash = get_short_hash()?;
-            let repo_name = repo_root
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("repo");
-            let context = TemplateContext::new(repo_name, branch, &short_hash);
-            let worktree_path = compute_worktree_path(config, repo_root, &context)?;
-
-            // Clean up orphaned directory if it exists (from previous pruned worktree)
-            remove_orphaned_directory(&worktree_path)?;
-
-            let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
-            // No -b flag: git DWIM creates a local tracking branch from the remote
-            run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
-                .map_err(|e| improve_worktree_add_error(e, branch))?;
-
-            Ok(CreateResult::CheckedOutFromRemote(worktree_path))
+            Ok(if is_remote_checkout {
+                CreateResult::CheckedOutFromRemote(worktree_path)
+            } else {
+                CreateResult::Created(worktree_path)
+            })
         }
         BranchStatus::DoesNotExist => {
             // Branch doesn't exist anywhere, create it from base
@@ -397,11 +383,6 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
 
     let worktrees = ensure_clean_state()?;
 
-    // Guard: the first entry is always the main working tree — never remove it.
-    let main_is_this = worktrees
-        .first()
-        .is_some_and(|main| main.branch.as_deref() == Some(branch));
-
     // Find worktree by branch
     let worktree = worktrees
         .iter()
@@ -410,11 +391,12 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
             branch: branch.to_string(),
         })?;
 
-    // Refuse to remove the main repository checkout
-    if main_is_this
-        || worktrees
-            .first()
-            .is_some_and(|main| main.path == worktree.path)
+    // Refuse to remove the main repository checkout (always the first entry in
+    // `git worktree list`). Path equality catches both the named-branch case and
+    // the detached-HEAD case where main.branch is None.
+    if worktrees
+        .first()
+        .is_some_and(|main| main.path == worktree.path)
     {
         return Err(AgentreeError::Worktree(format!(
             "Cannot remove the main repository checkout for branch '{}'.\n\
@@ -511,9 +493,7 @@ To fix this, try one of these options:
                     branch = branch,
                     path = path_str
                 )))
-            } else if error_msg.contains("Permission denied")
-                || error_msg.contains("permission denied")
-            {
+            } else if error_msg.to_lowercase().contains("permission denied") {
                 Err(AgentreeError::Worktree(format!(
                     "Cannot remove worktree for '{}': permission denied.\n\
                      Location: {}\n\n\
