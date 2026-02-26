@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `agentree create <branch> -b <ref>` now errors immediately when the branch
+  already exists locally or on a remote. Previously `-b` was silently ignored,
+  which could mislead users into thinking the worktree was created from their
+  specified ref.
+- `agentree cd <branch> -b <ref>` (and the `agent`/`editor` equivalents) now
+  emit a warning on stderr when the branch already exists and `-b` has no
+  effect, instead of silently discarding the flag.
+
 ## [0.7.2] - 2026-02-26
 
 ### Added
