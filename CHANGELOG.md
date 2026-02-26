@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `agentree create <branch>` now detects branches that exist only on a remote
+  (e.g. pushed by a teammate but never fetched locally). Previously agentree
+  would silently create a new disconnected branch from HEAD. It now recognises
+  the remote tracking ref and uses git DWIM to check out a proper local
+  tracking branch, reporting `"Checked out '<branch>' from remote and created
+  worktree at <path>"`.
+- Typo suggestions for `--base` now include remote tracking branches (e.g.
+  `origin/main`) in addition to local ones, making it easier to correct
+  mistyped remote refs.
+
+### Fixed
+
+- `agentree remove` now detects when the shell is inside the target worktree
+  and emits an actionable error instead of raw git output, telling the user to
+  navigate away first.
+- `agentree remove` now refuses to remove the main repository checkout with a
+  clear error. Only linked worktrees can be removed.
+- Removing multiple branches explicitly now continues past individual failures,
+  consistent with `--merged` / filter mode. A warning is printed per failure;
+  the command succeeds if at least one branch was removed.
+- Backend cleanup (Docker sandbox) no longer silently skips when the worktree
+  path lookup and the deletion call disagree on state. `delete_worktree` now
+  returns the canonical path it removed, which is used directly for cleanup.
+- Permission denied errors during worktree removal are now translated to an
+  actionable message with `chmod` and `sudo rm` remediation hints.
+- Creating a worktree on a repository with no commits now fails immediately
+  with a clear, actionable error instead of a cryptic
+  `"ambiguous argument 'HEAD': unknown revision"` git message.
+- Common `git worktree add` failures (branch already checked out elsewhere,
+  path already exists, invalid ref) are now translated to actionable error
+  messages with remediation hints instead of raw git stderr.
+
 ## [0.7.1] - 2026-02-20
 
 ### Fixed

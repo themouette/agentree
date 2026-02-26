@@ -1,7 +1,7 @@
 use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::commands::filters::{check_worktree_dirty, resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
-use crate::error::Result;
+use crate::error::{AgentreeError, Result};
 use crate::utils::git::get_git_root;
 use crate::utils::progress::with_spinner;
 use crate::worktree::operations::ForceLevel;
@@ -107,11 +107,9 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         );
     }
 
-    // Get worktrees to find paths before deletion
-    let worktrees = recovery::ensure_clean_state()?;
-
     // Dry-run: show what would be removed without touching anything
     if args.dry_run {
+        let worktrees = recovery::ensure_clean_state()?;
         for branch in &args.branches {
             let entry = worktrees
                 .iter()
@@ -124,25 +122,32 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
         return Ok(());
     }
 
+    let force_level = ForceLevel::from_count(args.force);
+    let mut removed = 0;
+    let mut failed_branches: Vec<String> = Vec::new();
+
     for branch in &args.branches {
-        // Find the workspace path before deleting
-        let worktree_entry = worktrees
-            .iter()
-            .find(|e| e.branch.as_deref() == Some(branch.as_str()));
-
-        let workspace_path = worktree_entry.map(|e| e.path.clone());
-
-        let force_level = ForceLevel::from_count(args.force);
         let msg = format!("Removing worktree for '{}'...", branch);
-        with_spinner(&msg, || {
+        match with_spinner(&msg, || {
             operations::delete_worktree(branch, force_level, args.unlock)
-        })?;
-        println!("Removed worktree for branch '{}'", branch);
-
-        // Cleanup backend resources if we found the workspace path
-        if let Some(path) = workspace_path {
-            cleanup_backend_resources(&path, config.effective_backend(), &config);
+        }) {
+            Ok(removed_path) => {
+                removed += 1;
+                println!("Removed worktree for branch '{}'", branch);
+                cleanup_backend_resources(&removed_path, config.effective_backend(), &config);
+            }
+            Err(e) => {
+                eprintln!("Error: Failed to remove '{}': {}", branch, e);
+                failed_branches.push(branch.clone());
+            }
         }
+    }
+
+    // Fail only when every branch failed (at least one success means partial success)
+    if removed == 0 && !failed_branches.is_empty() {
+        return Err(AgentreeError::Worktree(
+            "No worktrees were removed.".to_string(),
+        ));
     }
 
     Ok(())
@@ -218,16 +223,15 @@ fn remove_by_filters(
             Some(b) => b.to_string(),
             None => continue,
         };
-        let workspace_path = entry.path.clone();
         let msg = format!("Removing worktree for '{}'...", branch);
 
         match with_spinner(&msg, || {
             operations::delete_worktree(&branch, force_level, effective_unlock)
         }) {
-            Ok(_) => {
+            Ok(removed_path) => {
                 removed += 1;
                 println!("Removed worktree for branch '{}'", branch);
-                cleanup_backend_resources(&workspace_path, config.effective_backend(), config);
+                cleanup_backend_resources(&removed_path, config.effective_backend(), config);
             }
             Err(e) => {
                 eprintln!("Warning: Failed to remove worktree for '{}': {}", branch, e);

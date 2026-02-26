@@ -66,6 +66,13 @@ pub fn ensure_workspace_with_progress(
             let msg = format!("Creating worktree for '{}'...", branch);
             with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))
         }
+        BranchStatus::ExistsOnRemote(ref remote_ref) => {
+            let msg = format!(
+                "Checking out '{}' from '{}' and creating worktree...",
+                branch, remote_ref
+            );
+            with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))
+        }
         BranchStatus::DoesNotExist => {
             let msg = format!("Creating branch '{}' and worktree...", branch);
             with_spinner(&msg, || ensure_workspace(config, repo_root, branch, base))

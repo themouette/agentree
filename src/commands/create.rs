@@ -22,6 +22,12 @@ pub fn execute(args: CreateArgs) -> Result<()> {
     let branch = &args.workspace.branch;
     let base = args.workspace.base.as_deref();
 
+    // Validate base ref early so we get helpful "Did you mean X?" suggestions
+    // instead of a raw git error buried inside the spinner.
+    if let Some(ref_name) = base {
+        crate::utils::git::validate_start_ref(ref_name)?;
+    }
+
     let status = detect_branch_status(branch)?;
 
     if let BranchStatus::InWorktree(path) = &status {
@@ -36,6 +42,10 @@ pub fn execute(args: CreateArgs) -> Result<()> {
     let msg = match &status {
         BranchStatus::DoesNotExist => format!("Creating branch '{}' and worktree...", branch),
         BranchStatus::ExistsNotCheckedOut => format!("Creating worktree for '{}'...", branch),
+        BranchStatus::ExistsOnRemote(remote_ref) => format!(
+            "Checking out '{}' from '{}' and creating worktree...",
+            branch, remote_ref
+        ),
         BranchStatus::InWorktree(_) => unreachable!(),
     };
 

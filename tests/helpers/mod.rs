@@ -115,6 +115,42 @@ impl TestRepo {
             .expect("Failed to run agentree command")
     }
 
+    /// Initialize a bare remote repository and add it as "origin".
+    ///
+    /// Creates a bare git repo inside the test's temp directory, configures
+    /// it as the "origin" remote, and pushes the current branch so the remote
+    /// has a working HEAD.
+    ///
+    /// Returns the path to the bare remote repository.
+    pub fn setup_remote(&self) -> std::path::PathBuf {
+        let remote_path = self.temp_dir.path().join("remote.git");
+
+        // Create bare repo
+        Command::new("git")
+            .args(["init", "--bare", remote_path.to_str().unwrap()])
+            .env("GIT_CONFIG_GLOBAL", &self.global_gitconfig)
+            .output()
+            .expect("Failed to init bare remote repo");
+
+        // Register as origin
+        self.git(&["remote", "add", "origin", remote_path.to_str().unwrap()]);
+
+        // Push current branch to bootstrap the remote
+        let branch_output = Command::new("git")
+            .args(["symbolic-ref", "--short", "HEAD"])
+            .current_dir(&self.repo_path)
+            .env("GIT_CONFIG_GLOBAL", &self.global_gitconfig)
+            .output()
+            .expect("Failed to get current branch");
+        let current_branch = String::from_utf8_lossy(&branch_output.stdout)
+            .trim()
+            .to_string();
+
+        self.git(&["push", "-u", "origin", &current_branch]);
+
+        remote_path
+    }
+
     /// Get path to the agentree binary
     fn get_agentree_binary(&self) -> PathBuf {
         // Always prefer the debug binary so tests run against the code under test,
@@ -132,6 +168,11 @@ impl TestRepo {
     /// Get the repository path
     pub fn path(&self) -> &Path {
         &self.repo_path
+    }
+
+    /// Get the path to the isolated global gitconfig used by all git/agentree calls
+    pub fn global_gitconfig_path(&self) -> &std::path::Path {
+        &self.global_gitconfig
     }
 
     /// Get the expected worktrees directory path

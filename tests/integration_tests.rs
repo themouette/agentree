@@ -2618,3 +2618,244 @@ fn test_list_merged_empty_message_uses_current_branch() {
         stdout
     );
 }
+
+// ===== Worktree creation hardening tests =====
+
+/// Test that `agentree create` works when the branch exists only on a remote.
+///
+/// This is the canonical failure case: the user runs `agentree create feature`
+/// where `feature` was pushed by a teammate but never fetched locally.
+/// Previously agentree would silently create a brand-new disconnected branch
+/// from HEAD instead of checking out the remote branch.
+#[test]
+fn test_create_from_remote_only_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+    test_repo.setup_remote();
+
+    // Create a branch, push it to the remote, then delete the local copy
+    // so only origin/remote-feature remains.
+    test_repo.git(&["checkout", "-b", "remote-feature"]);
+    test_repo.commit("Remote feature work");
+    test_repo.git(&["push", "origin", "remote-feature"]);
+    test_repo.git(&["checkout", "main"]);
+    test_repo.git(&["branch", "-D", "remote-feature"]);
+
+    // Sanity-check: no local branch
+    let branch_list = test_repo.git(&["branch"]);
+    let branch_stdout = String::from_utf8_lossy(&branch_list.stdout);
+    assert!(
+        !branch_stdout.contains("remote-feature"),
+        "remote-feature should not be a local branch yet: {}",
+        branch_stdout
+    );
+
+    // agentree create should succeed and check out the remote branch
+    let output = test_repo.agentree(&["create", "remote-feature"]);
+    assert!(
+        output.status.success(),
+        "create should succeed for remote-only branch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("remote-feature"),
+        "Output should mention the branch name: {}",
+        stdout
+    );
+
+    // Verify worktree was actually created
+    let list_output = test_repo.agentree(&["list"]);
+    let list_stdout = String::from_utf8_lossy(&list_output.stdout);
+    assert!(
+        list_stdout.contains("remote-feature"),
+        "remote-feature worktree should appear in list: {}",
+        list_stdout
+    );
+}
+
+/// Test that `agentree create` correctly differentiates between a remote-only
+/// branch and a truly new branch.
+///
+/// When the branch doesn't exist anywhere, agentree should create a fresh
+/// branch from HEAD (not silently use a remote branch with the same name).
+#[test]
+fn test_create_new_branch_vs_remote_branch() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+    test_repo.setup_remote();
+
+    // This branch does NOT exist on the remote — must be created from scratch
+    let output = test_repo.agentree(&["create", "truly-new-branch"]);
+    assert!(
+        output.status.success(),
+        "create should succeed for a genuinely new branch: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Should say "Created branch" (not "Checked out from remote")
+    assert!(
+        stdout.contains("Created branch") || stdout.contains("truly-new-branch"),
+        "Output should reference the new branch: {}",
+        stdout
+    );
+}
+
+/// Test that creating a worktree on a repository with no commits fails with a
+/// clear, actionable error message instead of a cryptic git error.
+#[test]
+fn test_create_fails_on_empty_repository() {
+    let test_repo = TestRepo::new();
+    // init_git() creates the git repo and makes an initial commit.
+    // We want a repo with *no* commits — so we init manually without committing.
+    let repo_path = test_repo.path().to_path_buf();
+
+    Command::new("git")
+        .args(["init"])
+        .current_dir(&repo_path)
+        .env("GIT_CONFIG_GLOBAL", test_repo.global_gitconfig_path())
+        .output()
+        .expect("Failed to init git repo");
+    Command::new("git")
+        .args(["config", "user.email", "test@example.com"])
+        .current_dir(&repo_path)
+        .output()
+        .expect("Failed to configure git");
+    Command::new("git")
+        .args(["config", "user.name", "Test User"])
+        .current_dir(&repo_path)
+        .output()
+        .expect("Failed to configure git");
+    Command::new("git")
+        .args(["config", "commit.gpgsign", "false"])
+        .current_dir(&repo_path)
+        .output()
+        .expect("Failed to configure git");
+
+    // Write an agentree config so the backend validation doesn't interfere
+    let worktrees_path = repo_path.parent().unwrap().join("worktrees");
+    let config_content = format!(
+        "[backend]\ndefault = \"local\"\n\n[worktree]\nlocation = \"{}\"\n",
+        worktrees_path.display()
+    );
+    std::fs::write(repo_path.join(".agentree.toml"), config_content)
+        .expect("Failed to write config");
+
+    // Try to create a worktree — must fail with a helpful message
+    let output = test_repo.agentree(&["create", "some-branch"]);
+    assert!(
+        !output.status.success(),
+        "create should fail on a repository with no commits"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no commits") || stderr.contains("initial commit"),
+        "Error should explain that the repo has no commits: {}",
+        stderr
+    );
+}
+
+/// Test that removing the main branch (i.e. the main repo checkout) is refused
+/// with a clear, actionable error instead of a raw git message.
+#[test]
+fn test_remove_main_repo_branch_is_refused() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Attempt to remove the branch that the main repo is checked out on
+    let output = test_repo.agentree(&["remove", "main"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail when targeting the main repo branch"
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("main repository") || stderr.contains("linked worktrees"),
+        "Error should explain that only linked worktrees can be removed: {}",
+        stderr
+    );
+}
+
+/// Test that removing multiple branches continues past individual failures
+/// (missing branch) and reports the successes.
+#[test]
+fn test_remove_multiple_branches_continues_on_missing() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for branch-a but NOT for branch-b
+    let create_out = test_repo.agentree(&["create", "branch-a"]);
+    assert!(
+        create_out.status.success(),
+        "create branch-a should succeed: {}",
+        String::from_utf8_lossy(&create_out.stderr)
+    );
+
+    // Remove both: branch-a exists, branch-b does not
+    let output = test_repo.agentree(&["remove", "branch-a", "branch-b"]);
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // branch-a should have been removed
+    assert!(
+        stdout.contains("Removed") && stdout.contains("branch-a"),
+        "Should report branch-a removed: stdout={} stderr={}",
+        stdout,
+        stderr
+    );
+
+    // branch-b failure should appear in stderr
+    assert!(
+        stderr.contains("branch-b"),
+        "Should warn about branch-b failure: stderr={}",
+        stderr
+    );
+}
+
+/// Test that the command exits zero when at least one branch was removed,
+/// even if other branches were not found.
+#[test]
+fn test_remove_multiple_branches_partial_success_exits_zero() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create a worktree for branch-ok but NOT for branch-missing
+    let create_out = test_repo.agentree(&["create", "branch-ok"]);
+    assert!(
+        create_out.status.success(),
+        "create branch-ok should succeed: {}",
+        String::from_utf8_lossy(&create_out.stderr)
+    );
+
+    let output = test_repo.agentree(&["remove", "branch-ok", "branch-missing"]);
+
+    assert!(
+        output.status.success(),
+        "remove should exit 0 when at least one branch was removed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+/// Test that removing a completely nonexistent branch exits with a non-zero status.
+#[test]
+fn test_remove_nonexistent_all_fail_exits_nonzero() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    let output = test_repo.agentree(&["remove", "nonexistent-branch-xyz"]);
+    assert!(
+        !output.status.success(),
+        "remove should fail when no branches were removed"
+    );
+}

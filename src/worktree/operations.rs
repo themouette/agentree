@@ -12,9 +12,11 @@ use std::time::SystemTime;
 pub enum BranchStatus {
     /// Branch is already checked out in a worktree at the given path
     InWorktree(PathBuf),
-    /// Branch exists as a ref but is not checked out in any worktree
+    /// Branch exists as a local ref but is not checked out in any worktree
     ExistsNotCheckedOut,
-    /// Branch does not exist as a ref
+    /// Branch does not exist locally but exists on a remote (e.g., "origin/feature")
+    ExistsOnRemote(String),
+    /// Branch does not exist as a ref anywhere
     DoesNotExist,
 }
 
@@ -23,10 +25,12 @@ pub enum BranchStatus {
 pub enum CreateResult {
     /// Branch already had a worktree; returning existing path
     Resumed(PathBuf),
-    /// New worktree created for an existing branch
+    /// New worktree created for an existing local branch
     Created(PathBuf),
-    /// New branch and worktree were both created
+    /// New branch and worktree were both created from scratch
     CreatedWithBranch(PathBuf),
+    /// Local branch created from a remote tracking branch and worktree added
+    CheckedOutFromRemote(PathBuf),
 }
 
 impl CreateResult {
@@ -35,7 +39,8 @@ impl CreateResult {
         match self {
             CreateResult::Resumed(path)
             | CreateResult::Created(path)
-            | CreateResult::CreatedWithBranch(path) => path,
+            | CreateResult::CreatedWithBranch(path)
+            | CreateResult::CheckedOutFromRemote(path) => path,
         }
     }
 
@@ -43,7 +48,9 @@ impl CreateResult {
     pub fn was_created(&self) -> bool {
         matches!(
             self,
-            CreateResult::Created(_) | CreateResult::CreatedWithBranch(_)
+            CreateResult::Created(_)
+                | CreateResult::CreatedWithBranch(_)
+                | CreateResult::CheckedOutFromRemote(_)
         )
     }
 
@@ -67,6 +74,13 @@ impl CreateResult {
             CreateResult::CreatedWithBranch(path) => {
                 format!(
                     "Created branch '{}' and worktree at {}",
+                    branch,
+                    path.display()
+                )
+            }
+            CreateResult::CheckedOutFromRemote(path) => {
+                format!(
+                    "Checked out '{}' from remote and created worktree at {}",
                     branch,
                     path.display()
                 )
@@ -211,10 +225,17 @@ pub fn detect_branch_status(branch: &str) -> Result<BranchStatus> {
     .is_some();
 
     if exists {
-        Ok(BranchStatus::ExistsNotCheckedOut)
-    } else {
-        Ok(BranchStatus::DoesNotExist)
+        return Ok(BranchStatus::ExistsNotCheckedOut);
     }
+
+    // Branch doesn't exist locally — check if it exists on any remote.
+    // This handles the common case where a user passes a branch name that was
+    // pushed by a teammate but never fetched as a local branch.
+    if let Some(remote_ref) = crate::utils::git::find_remote_tracking_ref(branch)? {
+        return Ok(BranchStatus::ExistsOnRemote(remote_ref));
+    }
+
+    Ok(BranchStatus::DoesNotExist)
 }
 
 /// Ensure a workspace exists for the given branch, creating it if needed.
@@ -256,10 +277,11 @@ pub fn ensure_workspace(
 
 /// Create a worktree for a branch
 ///
-/// This function handles all three branch states:
+/// This function handles all four branch states:
 /// - If the branch is already in a worktree, returns the existing path as Resumed
-/// - If the branch exists but not in a worktree, checks it out in a new worktree
-/// - If the branch doesn't exist, creates it from the base and checks it out
+/// - If the branch exists locally but not in a worktree, checks it out in a new worktree
+/// - If the branch exists on a remote but not locally, creates a local tracking branch
+/// - If the branch doesn't exist anywhere, creates it from the base and checks it out
 ///
 /// Returns CreateResult indicating whether an existing worktree was resumed or a new one created.
 /// The caller (command handler) is responsible for printing user-facing messages.
@@ -272,6 +294,16 @@ pub fn create_worktree(
     // Validate branch name first
     validation::validate_branch_name(branch)?;
 
+    // Fail early with a clear message if the repo has no commits.
+    // git worktree add requires at least one commit to function.
+    if !has_commits()? {
+        return Err(AgentreeError::Worktree(
+            "Repository has no commits yet.\n\
+             Create an initial commit first:\n  git commit --allow-empty -m 'Initial commit'"
+                .to_string(),
+        ));
+    }
+
     let status = detect_branch_status(branch)?;
 
     match status {
@@ -279,8 +311,12 @@ pub fn create_worktree(
             // Branch already has a worktree - return existing path
             Ok(CreateResult::Resumed(path))
         }
-        BranchStatus::ExistsNotCheckedOut => {
-            // Branch exists, check it out in a new worktree
+        status @ (BranchStatus::ExistsNotCheckedOut | BranchStatus::ExistsOnRemote(_)) => {
+            // Both cases use the same git DWIM command: no -b flag lets git resolve the
+            // branch as either a local ref or a remote-tracking branch transparently.
+            // We only differ in the CreateResult variant returned to the caller.
+            let is_remote_checkout = matches!(status, BranchStatus::ExistsOnRemote(_));
+
             let short_hash = get_short_hash()?;
             let repo_name = repo_root
                 .file_name()
@@ -289,16 +325,21 @@ pub fn create_worktree(
             let context = TemplateContext::new(repo_name, branch, &short_hash);
             let worktree_path = compute_worktree_path(config, repo_root, &context)?;
 
-            // Clean up orphaned directory if it exists (from previous pruned worktree)
+            // Clean up orphaned directory if it exists (from a previous pruned worktree)
             remove_orphaned_directory(&worktree_path)?;
 
             let path_str = crate::utils::git::path_to_str(&worktree_path, "worktree path")?;
-            run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")?;
+            run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
+                .map_err(|e| improve_worktree_add_error(e, branch))?;
 
-            Ok(CreateResult::Created(worktree_path))
+            Ok(if is_remote_checkout {
+                CreateResult::CheckedOutFromRemote(worktree_path)
+            } else {
+                CreateResult::Created(worktree_path)
+            })
         }
         BranchStatus::DoesNotExist => {
-            // Branch doesn't exist, create it from base
+            // Branch doesn't exist anywhere, create it from base
             let short_hash = get_short_hash()?;
             let repo_name = repo_root
                 .file_name()
@@ -319,7 +360,8 @@ pub fn create_worktree(
                 args.push(base_branch);
             }
 
-            run_git_command_no_timeout(&args, "create worktree")?;
+            run_git_command_no_timeout(&args, "create worktree")
+                .map_err(|e| improve_worktree_add_error(e, branch))?;
 
             Ok(CreateResult::CreatedWithBranch(worktree_path))
         }
@@ -329,12 +371,13 @@ pub fn create_worktree(
 /// Delete a worktree by branch name
 ///
 /// This removes the worktree directory and updates git metadata, but preserves the branch.
+/// Returns the path of the removed worktree so callers can use it for cleanup.
 ///
 /// # Arguments
 /// * `branch` - Branch name to remove
 /// * `force_level` - How aggressively to remove (None/IgnoreDirty/IgnoreLocked)
 /// * `unlock` - If true, attempt to unlock the worktree before removing
-pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> Result<()> {
+pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> Result<PathBuf> {
     // Validate branch name first
     validation::validate_branch_name(branch)?;
 
@@ -348,11 +391,29 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
             branch: branch.to_string(),
         })?;
 
-    let path_str = crate::utils::git::path_to_str(&worktree.path, "worktree path")?;
+    // Refuse to remove the main repository checkout (always the first entry in
+    // `git worktree list`). Path equality catches both the named-branch case and
+    // the detached-HEAD case where main.branch is None.
+    if worktrees
+        .first()
+        .is_some_and(|main| main.path == worktree.path)
+    {
+        return Err(AgentreeError::Worktree(format!(
+            "Cannot remove the main repository checkout for branch '{}'.\n\
+             Only linked worktrees can be removed.\n\
+             To switch the main repo to a different branch:\n\
+               git checkout <other-branch>",
+            branch
+        )));
+    }
+
+    let path = worktree.path.clone();
+    // Obtain an owned string so we can move `path` freely after the git call
+    let path_str = crate::utils::git::path_to_str(&path, "worktree path")?.to_string();
 
     // If unlock flag is set, try to unlock first
     if unlock {
-        match run_git_command_no_timeout(&["worktree", "unlock", path_str], "unlock worktree") {
+        match run_git_command_no_timeout(&["worktree", "unlock", &path_str], "unlock worktree") {
             Ok(_) => {
                 eprintln!("Unlocked worktree for branch '{}'", branch);
             }
@@ -376,16 +437,32 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
     #[allow(clippy::manual_repeat_n)]
     args.extend(std::iter::repeat("--force").take(force_level.flag_count()));
 
-    args.push(path_str);
+    args.push(&path_str);
 
     // Try to remove the worktree
     match run_git_command_no_timeout(&args, "remove worktree") {
-        Ok(_) => Ok(()),
+        Ok(_) => Ok(path),
         Err(e) => {
             // Parse the error to provide helpful guidance
             let error_msg = e.to_string();
 
-            if error_msg.contains("locked working tree") {
+            if error_msg.contains("contains the current working directory") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove worktree for '{}': your shell is currently inside it.\n\
+                     Navigate away first, then retry:\n\
+                       agentree cd        # return to main repository\n\
+                       agentree remove {}",
+                    branch, branch
+                )))
+            } else if error_msg.contains("is a main working tree") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove the main repository checkout for branch '{}'.\n\
+                     Only linked worktrees can be removed.\n\
+                     To switch the main repo to a different branch:\n\
+                       git checkout <other-branch>",
+                    branch
+                )))
+            } else if error_msg.contains("locked working tree") {
                 Err(AgentreeError::Worktree(format!(
                     r#"Cannot remove locked worktree for branch '{branch}'.
 
@@ -415,6 +492,16 @@ To fix this, try one of these options:
 3. Stash changes: cd "{path}" && git stash"#,
                     branch = branch,
                     path = path_str
+                )))
+            } else if error_msg.to_lowercase().contains("permission denied") {
+                Err(AgentreeError::Worktree(format!(
+                    "Cannot remove worktree for '{}': permission denied.\n\
+                     Location: {}\n\n\
+                     Fix directory permissions:\n\
+                       chmod -R u+w \"{}\"\n\
+                     Or remove manually with elevated privileges:\n\
+                       sudo rm -rf \"{}\"",
+                    branch, path_str, path_str, path_str
                 )))
             } else {
                 // Return the original error if we can't provide specific guidance
@@ -486,6 +573,56 @@ fn get_short_hash() -> Result<String> {
     run_git_command(&["rev-parse", "--short", "HEAD"], "get short hash")
 }
 
+/// Check whether the repository has at least one commit.
+fn has_commits() -> Result<bool> {
+    Ok(run_git_query(&["rev-parse", "--verify", "HEAD"])?.is_some())
+}
+
+/// Translate a raw `git worktree add` error into an actionable message.
+///
+/// Git's error messages are often terse. This function maps the most common
+/// failure patterns to clearer, user-friendly alternatives while keeping
+/// the original error as context.
+fn improve_worktree_add_error(
+    err: crate::error::AgentreeError,
+    branch: &str,
+) -> crate::error::AgentreeError {
+    let msg = err.to_string();
+
+    if msg.contains("already checked out") || msg.contains("is already checked out") {
+        return AgentreeError::Worktree(format!(
+            "Branch '{branch}' is already checked out in another worktree.\n\
+             Use `agentree list` to see existing worktrees."
+        ));
+    }
+
+    if msg.contains("already exists") {
+        return AgentreeError::Worktree(
+            "Worktree path already exists and is not managed by git.\n\
+             Run `agentree doctor` to detect and fix orphaned directories."
+                .to_string(),
+        );
+    }
+
+    if msg.contains("is not a valid branch name") || msg.contains("not a valid object name") {
+        return AgentreeError::Worktree(format!(
+            "Cannot create worktree: '{branch}' is not a valid git ref.\n\
+             Ensure the base branch or commit exists: `git log --oneline -5`"
+        ));
+    }
+
+    if msg.contains("is not a commit") {
+        return AgentreeError::Worktree(
+            "Cannot create worktree: the specified ref does not point to a commit.\n\
+             Check the ref with: `git rev-parse <ref>`"
+                .to_string(),
+        );
+    }
+
+    // Return original error unchanged if we cannot provide better guidance
+    err
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -497,10 +634,12 @@ mod tests {
         let status2 = BranchStatus::InWorktree(PathBuf::from("/test"));
         let status3 = BranchStatus::ExistsNotCheckedOut;
         let status4 = BranchStatus::DoesNotExist;
+        let status5 = BranchStatus::ExistsOnRemote("origin/feature".to_string());
 
         assert_eq!(status1, status2);
         assert_ne!(status1, status3);
         assert_ne!(status3, status4);
+        assert_ne!(status4, status5);
     }
 
     #[test]
@@ -509,10 +648,12 @@ mod tests {
         let result2 = CreateResult::Resumed(PathBuf::from("/test"));
         let result3 = CreateResult::Created(PathBuf::from("/test"));
         let result4 = CreateResult::CreatedWithBranch(PathBuf::from("/test"));
+        let result5 = CreateResult::CheckedOutFromRemote(PathBuf::from("/test"));
 
         assert_eq!(result1, result2);
         assert_ne!(result1, result3);
         assert_ne!(result3, result4);
+        assert_ne!(result4, result5);
     }
 
     #[test]
@@ -521,6 +662,10 @@ mod tests {
         assert_eq!(CreateResult::Resumed(path.clone()).path(), &path);
         assert_eq!(CreateResult::Created(path.clone()).path(), &path);
         assert_eq!(CreateResult::CreatedWithBranch(path.clone()).path(), &path);
+        assert_eq!(
+            CreateResult::CheckedOutFromRemote(path.clone()).path(),
+            &path
+        );
     }
 
     #[test]
@@ -529,6 +674,7 @@ mod tests {
         assert!(!CreateResult::Resumed(path.clone()).was_created());
         assert!(CreateResult::Created(path.clone()).was_created());
         assert!(CreateResult::CreatedWithBranch(path.clone()).was_created());
+        assert!(CreateResult::CheckedOutFromRemote(path.clone()).was_created());
     }
 
     #[test]
@@ -543,6 +689,9 @@ mod tests {
 
         let msg = CreateResult::CreatedWithBranch(path.clone()).message("feature");
         assert!(msg.contains("Created branch") && msg.contains("feature"));
+
+        let msg = CreateResult::CheckedOutFromRemote(path.clone()).message("feature");
+        assert!(msg.contains("Checked out") && msg.contains("remote") && msg.contains("feature"));
     }
 
     #[test]
