@@ -128,6 +128,27 @@ pub fn agent_session_name(branch: &str) -> String {
     format!("agentree:{}", safe)
 }
 
+/// Returns true if pane 0 in the given session's window 0 has its process exited.
+///
+/// Uses `tmux list-panes -F '#{pane_dead}'` which outputs "1" for dead panes.
+///
+/// Assumes pane-base-index 0 (tmux default). Users with pane-base-index 1 will need to adjust.
+pub fn is_tui_pane_dead(session: &str) -> bool {
+    let target = format!("{}:0", session);
+    let output = Command::new("tmux")
+        .args(["list-panes", "-t", &target, "-F", "#{pane_dead}"])
+        .output();
+    output
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .next() // pane 0 is the first line
+                .map(|l| l.trim() == "1")
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
 /// Ensure a named tmux session exists for an agent in the given worktree.
 /// If the session already exists, does nothing.
 pub fn ensure_agent_session(branch: &str, worktree_path: &Path, agent_cmd: &str) -> Result<()> {
