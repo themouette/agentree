@@ -35,6 +35,16 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
 
     std::fs::create_dir_all(&runtime_dir).map_err(AgentreeError::Io)?;
 
+    // Register signal handlers BEFORE writing PID file or binding socket
+    // so no signal arrives between bind and handler registration.
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate())
+        .map_err(|e| AgentreeError::DaemonError(format!("SIGTERM handler: {}", e)))?;
+    let mut sigint = signal(SignalKind::interrupt())
+        .map_err(|e| AgentreeError::DaemonError(format!("SIGINT handler: {}", e)))?;
+    let mut sighup = signal(SignalKind::hangup())
+        .map_err(|e| AgentreeError::DaemonError(format!("SIGHUP handler: {}", e)))?;
+
     // Write PID file
     let pid = std::process::id();
     let pid_file = runtime_dir.join("daemon.pid");
@@ -72,7 +82,6 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
         loop {
             tick.tick().await;
             let _ = state_rescan.refresh_all();
-            // Add any new worktree .agentree/ paths to the file watcher
             let new_paths: Vec<PathBuf> = state_rescan
                 .get_all_agentree_paths()
                 .into_iter()
@@ -98,19 +107,53 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
     let listener = UnixListener::bind(&sock_path)
         .map_err(|e| AgentreeError::DaemonError(format!("Failed to bind socket: {}", e)))?;
 
-    eprintln!("agentree daemon listening on {}", sock_path.display());
+    tracing::info!("agentree daemon started. PID: {}. Socket: {}", pid, sock_path.display());
 
+    // Accept loop — exits on signal
     loop {
-        let (stream, _) = listener
-            .accept()
-            .await
-            .map_err(|e| AgentreeError::DaemonError(format!("Accept error: {}", e)))?;
-
-        let state_conn = Arc::clone(&state);
-        tokio::spawn(async move {
-            handle_connection(stream, state_conn).await;
-        });
+        tokio::select! {
+            result = listener.accept() => {
+                let (stream, _) = result
+                    .map_err(|e| AgentreeError::DaemonError(format!("Accept error: {}", e)))?;
+                let state_conn = Arc::clone(&state);
+                tokio::spawn(async move {
+                    handle_connection(stream, state_conn).await;
+                });
+            }
+            _ = sigterm.recv() => {
+                tracing::info!("SIGTERM received, shutting down");
+                break;
+            }
+            _ = sigint.recv() => {
+                tracing::info!("SIGINT received, shutting down");
+                break;
+            }
+            _ = sighup.recv() => {
+                // SIGHUP: triggers shutdown (reload deferred to future)
+                tracing::info!("SIGHUP received, shutting down");
+                break;
+            }
+        }
     }
+
+    // Graceful drain: stop accepting, allow in-flight one-shot requests to complete
+    // The one-shot protocol resolves in <100ms; 5s is generous.
+    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+    // Cleanup runtime files
+    cleanup_runtime_files(&sock_path, &pid_file);
+
+    Ok(())
+}
+
+fn cleanup_runtime_files(sock_path: &Path, pid_file: &Path) {
+    if sock_path.exists() {
+        let _ = std::fs::remove_file(sock_path);
+    }
+    if pid_file.exists() {
+        let _ = std::fs::remove_file(pid_file);
+    }
+    tracing::info!("Daemon stopped, runtime files cleaned up");
 }
 
 async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonState>) {
