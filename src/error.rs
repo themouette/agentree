@@ -122,6 +122,9 @@ pub enum AgentreeError {
     #[error("Daemon is not running and could not be started.\nTry running `agentree daemon` manually.")]
     DaemonNotRunning,
 
+    #[error("Daemon failed to start. Check logs: {log_path}")]
+    DaemonStartFailed { log_path: String },
+
     #[error("tmux error: {0}")]
     TmuxError(String),
 }
