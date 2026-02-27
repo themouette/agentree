@@ -4,13 +4,13 @@ use crate::dashboard::tmux;
 use crate::dashboard::DASHBOARD_SESSION;
 use crate::error::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
+    event::{self, EnableFocusChange, DisableFocusChange, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout},
+    layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
@@ -20,20 +20,33 @@ use std::io;
 use std::time::{Duration, Instant};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
-const LEFT_PANE_WIDTH: u16 = 44;
+
+#[derive(PartialEq)]
+enum TuiStartupState {
+    Connecting,
+    Connected,
+    ConnectionLost,
+}
 
 struct TuiState {
     workspaces: Vec<WorkspaceInfo>,
     selected: usize,
     last_refresh: Instant,
+    focused: bool,
+    startup: TuiStartupState,
+    /// Frame counter for spinner animation
+    frame: u64,
 }
 
 impl TuiState {
-    fn new(workspaces: Vec<WorkspaceInfo>) -> Self {
+    fn new() -> Self {
         TuiState {
-            workspaces,
+            workspaces: vec![],
             selected: 0,
             last_refresh: Instant::now(),
+            focused: true,
+            startup: TuiStartupState::Connecting,
+            frame: 0,
         }
     }
 
@@ -62,19 +75,24 @@ impl TuiState {
 pub fn run_tui(client: DaemonClient) -> Result<()> {
     enable_raw_mode().map_err(crate::error::AgentreeError::Io)?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen).map_err(crate::error::AgentreeError::Io)?;
+    execute!(stdout, EnterAlternateScreen, EnableFocusChange)
+        .map_err(crate::error::AgentreeError::Io)?;
 
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).map_err(crate::error::AgentreeError::Io)?;
 
-    let workspaces = client.list_workspaces().unwrap_or_default();
-    let mut state = TuiState::new(workspaces);
+    // Start in Connecting state; transition to Connected on first successful list
+    let mut state = TuiState::new();
 
     let result = run_event_loop(&mut terminal, &mut state, &client);
 
     // Restore terminal unconditionally
     let _ = disable_raw_mode();
-    let _ = execute!(terminal.backend_mut(), LeaveAlternateScreen);
+    let _ = execute!(
+        terminal.backend_mut(),
+        DisableFocusChange,
+        LeaveAlternateScreen
+    );
     let _ = terminal.show_cursor();
 
     result
@@ -86,44 +104,75 @@ fn run_event_loop(
     client: &DaemonClient,
 ) -> Result<()> {
     loop {
+        state.frame = state.frame.wrapping_add(1);
         terminal
             .draw(|f| render(f, state))
             .map_err(crate::error::AgentreeError::Io)?;
 
-        // Poll for input with a 1s timeout for refresh
-        if event::poll(REFRESH_INTERVAL).map_err(crate::error::AgentreeError::Io)? {
-            if let Event::Key(key) = event::read().map_err(crate::error::AgentreeError::Io)? {
-                match (key.modifiers, key.code) {
-                    // Quit
-                    (_, KeyCode::Char('q')) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                        break;
+        // When Connecting, poll frequently to transition fast
+        let poll_timeout = if state.startup == TuiStartupState::Connecting {
+            Duration::from_millis(100)
+        } else {
+            REFRESH_INTERVAL
+        };
+
+        if event::poll(poll_timeout).map_err(crate::error::AgentreeError::Io)? {
+            match event::read().map_err(crate::error::AgentreeError::Io)? {
+                Event::Key(key) => {
+                    match (key.modifiers, key.code) {
+                        // Quit
+                        (_, KeyCode::Char('q')) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                            break;
+                        }
+                        // Navigation
+                        (_, KeyCode::Down) | (_, KeyCode::Char('j')) => state.next(),
+                        (_, KeyCode::Up) | (_, KeyCode::Char('k')) => state.prev(),
+                        // Actions
+                        (_, KeyCode::Char('a')) => action_agent(state),
+                        (_, KeyCode::Char('t')) => action_terminal(state),
+                        (_, KeyCode::Char('e')) => action_editor(state),
+                        (_, KeyCode::Char('c')) => action_clear_attention(state, client),
+                        // Retry connection
+                        (_, KeyCode::Char('r')) => {
+                            if state.startup == TuiStartupState::ConnectionLost {
+                                state.startup = TuiStartupState::Connecting;
+                            }
+                        }
+                        _ => {}
                     }
-                    // Navigation
-                    (_, KeyCode::Down) | (_, KeyCode::Char('j')) => state.next(),
-                    (_, KeyCode::Up) | (_, KeyCode::Char('k')) => state.prev(),
-                    // Actions
-                    (_, KeyCode::Char('a')) => action_agent(state),
-                    (_, KeyCode::Char('t')) => action_terminal(state),
-                    (_, KeyCode::Char('e')) => action_editor(state),
-                    (_, KeyCode::Char('c')) => action_clear_attention(state, client),
-                    _ => {}
                 }
+                Event::FocusLost => {
+                    state.focused = false;
+                }
+                Event::FocusGained => {
+                    state.focused = true;
+                }
+                _ => {}
             }
         }
 
-        // Refresh from daemon on interval
-        if state.last_refresh.elapsed() >= REFRESH_INTERVAL {
-            if let Ok(ws) = client.list_workspaces() {
-                let selected_branch = state
-                    .selected_workspace()
-                    .map(|w| w.branch.clone());
-                state.workspaces = ws;
-                // Preserve selection by branch name
-                if let Some(branch) = selected_branch {
-                    if let Some(idx) = state.workspaces.iter().position(|w| w.branch == branch) {
-                        state.selected = idx;
-                    } else {
-                        state.selected = 0;
+        // Refresh from daemon on interval (or every poll when Connecting)
+        if state.startup == TuiStartupState::Connecting
+            || state.last_refresh.elapsed() >= REFRESH_INTERVAL
+        {
+            match client.list_workspaces() {
+                Ok(ws) => {
+                    let selected_branch = state.selected_workspace().map(|w| w.branch.clone());
+                    state.workspaces = ws;
+                    // Preserve selection by branch name
+                    if let Some(branch) = selected_branch {
+                        if let Some(idx) = state.workspaces.iter().position(|w| w.branch == branch)
+                        {
+                            state.selected = idx;
+                        } else {
+                            state.selected = 0;
+                        }
+                    }
+                    state.startup = TuiStartupState::Connected;
+                }
+                Err(_) => {
+                    if state.startup == TuiStartupState::Connected {
+                        state.startup = TuiStartupState::ConnectionLost;
                     }
                 }
             }
@@ -134,93 +183,201 @@ fn run_event_loop(
 }
 
 fn render(f: &mut ratatui::Frame, state: &TuiState) {
-    let area = f.area();
+    match state.startup {
+        TuiStartupState::Connecting => render_connecting(f, f.area(), state.frame),
+        TuiStartupState::ConnectionLost => render_connection_lost(f, f.area()),
+        TuiStartupState::Connected => render_workspace_list(f, f.area(), state),
+    }
+}
 
-    // Outer layout: left list pane + right workspace pane
+fn render_connecting(f: &mut ratatui::Frame, area: ratatui::layout::Rect, frame: u64) {
+    const SPINNER_FRAMES: [char; 4] = ['|', '/', '-', '\\'];
+    let spinner = SPINNER_FRAMES[(frame / 5) as usize % 4];
+    let text = format!("{} Connecting...", spinner);
+
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Cyan));
+
+    // Vertically center by splitting
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
+        .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(LEFT_PANE_WIDTH),
+            Constraint::Fill(1),
+            Constraint::Length(1),
             Constraint::Fill(1),
         ])
         .split(area);
 
-    render_left(f, chunks[0], state);
-    render_right(f, chunks[1], state);
+    f.render_widget(paragraph, chunks[1]);
 }
 
-fn render_left(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
-    // Split into list area + help bar at the bottom
-    let inner = Layout::default()
+fn render_connection_lost(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    let text = "Lost connection to daemon. Press r to retry.";
+
+    let paragraph = Paragraph::new(text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::Red));
+
+    let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Fill(1), Constraint::Length(3)])
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
         .split(area);
 
+    f.render_widget(paragraph, chunks[1]);
+}
+
+fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
+    // Split into: header line + list area + help bar at the bottom
+    let inner = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Fill(1),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+    // ── header line ──
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        " \u{1F916}  BRANCH             \u{2191}  \u{00B1}   AGE",
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )]));
+    f.render_widget(header, inner[0]);
+
     // ── workspace list ──
-    let items: Vec<ListItem> = state
-        .workspaces
-        .iter()
-        .enumerate()
-        .map(|(i, ws)| {
-            let attention = if ws.attention.is_some() { "⚑ " } else { "  " };
-            let selected_marker = if i == state.selected { ">" } else { " " };
-            let ahead = format!("↑{}", ws.commits_ahead);
-            let changed = format!("{}f", ws.files_changed);
-            let age = format_age(ws.last_activity.as_deref());
+    if state.workspaces.is_empty() {
+        let empty_msg = Paragraph::new(vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "No workspaces yet.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(Span::styled(
+                "Run: agentree create <branch>",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ])
+        .alignment(Alignment::Center)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        );
+        f.render_widget(empty_msg, inner[1]);
+    } else {
+        // Available width: inner[1].width minus 2 for borders
+        let list_width = inner[1].width.saturating_sub(2) as usize;
+        // Layout within each row (approximate):
+        // robot(2) + space(1) + attention(2) + branch(variable) + stats + age(7)
+        // Reserve: robot=2, attention=2, stats=8 (↑N ±N), age=7, spaces=3
+        let branch_width = list_width.saturating_sub(2 + 2 + 8 + 7 + 3).max(6);
 
-            let branch = truncate(&ws.branch, 18);
-            let status = format!("{:>3} {:>3}", ahead, changed);
+        let items: Vec<ListItem> = state
+            .workspaces
+            .iter()
+            .enumerate()
+            .map(|(i, ws)| {
+                let agent_running =
+                    tmux::session_exists(&tmux::agent_session_name(&ws.branch));
 
-            let line_str = format!(
-                "{}{} {:<18} {:<8} {:>7}",
-                selected_marker, attention, branch, status, age
+                // Robot icon: green if agent running, DarkGray otherwise
+                let robot_style = if agent_running {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+
+                // Attention icon
+                let attention_str = if ws.attention.is_some() { "\u{2691} " } else { "  " };
+                let attention_style = if ws.attention.is_some() {
+                    Style::default().fg(Color::Red)
+                } else {
+                    Style::default()
+                };
+
+                // Branch name (middle-truncated)
+                let branch = truncate_middle(&ws.branch, branch_width);
+
+                // Conditional git stats
+                let ahead_str = if ws.commits_ahead > 0 {
+                    format!("\u{2191}{}", ws.commits_ahead)
+                } else {
+                    String::new()
+                };
+                let changed_str = if ws.files_changed > 0 {
+                    format!("\u{00B1}{}", ws.files_changed)
+                } else {
+                    String::new()
+                };
+
+                let age = format_age(ws.last_activity.as_deref());
+
+                let stats_str = format!("{:>3} {:>3}", ahead_str, changed_str);
+
+                let spans = vec![
+                    Span::styled(" \u{1F916} ", robot_style),
+                    Span::styled(attention_str, attention_style),
+                    Span::raw(format!("{:<width$} ", branch, width = branch_width)),
+                    Span::styled(stats_str, Style::default().fg(Color::DarkGray)),
+                    Span::raw(" "),
+                    Span::styled(format!("{:>7}", age), Style::default().fg(Color::DarkGray)),
+                ];
+
+                // Attention rows (not selected) get red background
+                let item_style = if ws.attention.is_some() && i != state.selected {
+                    Style::default().bg(Color::Red)
+                } else {
+                    Style::default()
+                };
+
+                ListItem::new(Line::from(spans)).style(item_style)
+            })
+            .collect();
+
+        let highlight_style = if state.focused {
+            Style::default()
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .bg(Color::DarkGray)
+                .add_modifier(Modifier::DIM)
+        };
+
+        let list = List::new(items)
+            .highlight_style(highlight_style)
+            .highlight_symbol("")
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::DarkGray)),
             );
 
-            let style = if i == state.selected {
-                Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else if ws.attention.is_some() {
-                Style::default().fg(Color::Red)
-            } else {
-                Style::default()
-            };
+        let mut list_state = ListState::default();
+        list_state.select(Some(state.selected));
 
-            ListItem::new(Line::from(Span::styled(line_str, style)))
-        })
-        .collect();
-
-    let header = Line::from(vec![
-        Span::styled(
-            format!("  {:<20} {:<8} {:>7}", "BRANCH", "STATUS", "AGE"),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-
-    let list = List::new(items).block(
-        Block::default()
-            .title(header)
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-
-    let mut list_state = ListState::default();
-    list_state.select(Some(state.selected));
-
-    f.render_stateful_widget(list, inner[0], &mut list_state);
+        f.render_stateful_widget(list, inner[1], &mut list_state);
+    }
 
     // ── help bar ──
     let help = Paragraph::new(Line::from(vec![
+        Span::styled("[j/k]", Style::default().fg(Color::Yellow)),
+        Span::raw(" navigate  "),
         Span::styled("[a]", Style::default().fg(Color::Yellow)),
-        Span::raw("gent "),
+        Span::raw("gent  "),
         Span::styled("[t]", Style::default().fg(Color::Yellow)),
-        Span::raw("erminal "),
+        Span::raw("erminal  "),
         Span::styled("[e]", Style::default().fg(Color::Yellow)),
-        Span::raw("ditor "),
+        Span::raw("ditor  "),
         Span::styled("[c]", Style::default().fg(Color::Yellow)),
-        Span::raw("lear "),
+        Span::raw("lear  "),
         Span::styled("[q]", Style::default().fg(Color::Yellow)),
         Span::raw("uit"),
     ]))
@@ -230,74 +387,7 @@ fn render_left(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiS
             .border_style(Style::default().fg(Color::DarkGray)),
     );
 
-    f.render_widget(help, inner[1]);
-}
-
-fn render_right(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
-    let content = if let Some(ws) = state.selected_workspace() {
-        let mut lines = vec![
-            Line::from(Span::styled(
-                format!(" Branch: {}", ws.branch),
-                Style::default().fg(Color::Cyan),
-            )),
-            Line::from(Span::raw(format!(" Path:   {}", ws.path))),
-        ];
-
-        if let Some(status) = &ws.agent_status {
-            lines.push(Line::from(Span::raw("")));
-            lines.push(Line::from(Span::styled(
-                format!(" Agent:  {}", status.phase),
-                Style::default().fg(Color::Green),
-            )));
-            if let Some(task) = &status.current_task {
-                lines.push(Line::from(Span::raw(format!(" Task:   {}", task))));
-            }
-        }
-
-        if ws.attention.is_some() {
-            lines.push(Line::from(Span::raw("")));
-            lines.push(Line::from(Span::styled(
-                " ⚑ Agent needs attention — press [c] to clear",
-                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            )));
-        }
-
-        lines.push(Line::from(Span::raw("")));
-        lines.push(Line::from(Span::raw(format!(
-            " Commits ahead: {}  |  Files changed: {}",
-            ws.commits_ahead, ws.files_changed
-        ))));
-
-        if let Some(act) = &ws.last_activity {
-            lines.push(Line::from(Span::raw(format!(" Last activity: {}", act))));
-        }
-
-        lines.push(Line::from(Span::raw("")));
-        lines.push(Line::from(Span::styled(
-            " Press [a] to open agent, [t] terminal, [e] editor",
-            Style::default().fg(Color::DarkGray),
-        )));
-
-        lines
-    } else {
-        vec![
-            Line::from(Span::raw("")),
-            Line::from(Span::styled(
-                " No workspaces found.",
-                Style::default().fg(Color::DarkGray),
-            )),
-            Line::from(Span::raw(" Create one with: agentree create <branch>")),
-        ]
-    };
-
-    let paragraph = Paragraph::new(content).block(
-        Block::default()
-            .title(" Workspace ")
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-
-    f.render_widget(paragraph, area);
+    f.render_widget(help, inner[2]);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,13 +462,16 @@ fn format_age(last_activity: Option<&str>) -> String {
     }
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{}…", cut)
+/// Middle-truncate a string to at most `max` chars, using "…" in the middle.
+fn truncate_middle(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
     }
+    let half = (max.saturating_sub(1)) / 2;
+    let prefix: String = chars[..half].iter().collect();
+    let suffix: String = chars[chars.len() - (max - 1 - half)..].iter().collect();
+    format!("{}\u{2026}{}", prefix, suffix)
 }
 
 /// Wrap a string in single quotes with internal single quotes escaped.
