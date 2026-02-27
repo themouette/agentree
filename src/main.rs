@@ -1,6 +1,6 @@
 use agentree::commands::{
-    agent, cd, clean, completion, create, doctor, editor, exec, list, remove, shell, shell_init,
-    update,
+    agent, cd, clean, completion, create, daemon, dashboard, doctor, editor, exec, list, remove,
+    shell, shell_init, update,
 };
 use agentree::constants::DEFAULT_AGENTS;
 use agentree::version;
@@ -74,6 +74,13 @@ enum Command {
 
     /// Update agentree to latest or specified version
     Update(update::UpdateArgs),
+
+    /// Open a dashboard to monitor and interact with all workspaces
+    Dashboard(dashboard::DashboardArgs),
+
+    /// Run workspace state daemon (background process)
+    #[command(hide = true)]
+    Daemon(daemon::DaemonArgs),
 }
 
 fn main() {
@@ -127,6 +134,8 @@ fn main() {
             completion::execute(args, &mut cmd)
         }
         Command::Update(args) => update::execute(args),
+        Command::Dashboard(args) => dashboard::execute(args),
+        Command::Daemon(args) => daemon::execute(args),
     };
 
     if let Err(e) = result {

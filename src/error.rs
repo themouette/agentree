@@ -112,6 +112,15 @@ pub enum AgentreeError {
 
     #[error("Docker sandbox '{name}' not found.\nThe sandbox may have been removed outside of agentree.\nTry running: agentree remove {branch} && agentree create {branch}")]
     SandboxNotFound { name: String, branch: String },
+
+    #[error("tmux is not installed. Install it with: brew install tmux (macOS) or apt install tmux (Linux)")]
+    TmuxNotFound,
+
+    #[error("Daemon is not running and could not be started.\nTry running `agentree daemon` manually.")]
+    DaemonNotRunning,
+
+    #[error("tmux error: {0}")]
+    TmuxError(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentreeError>;
