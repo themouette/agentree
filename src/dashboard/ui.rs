@@ -1,6 +1,7 @@
 use crate::daemon::protocol::WorkspaceInfo;
 use crate::dashboard::client::DaemonClient;
 use crate::dashboard::tmux;
+use crate::dashboard::DASHBOARD_SESSION;
 use crate::error::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
@@ -20,7 +21,6 @@ use std::time::{Duration, Instant};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(1);
 const LEFT_PANE_WIDTH: u16 = 44;
-const DASHBOARD_SESSION: &str = "agentree-dashboard";
 
 struct TuiState {
     workspaces: Vec<WorkspaceInfo>,
@@ -308,10 +308,10 @@ fn action_agent(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
         let agent_session = tmux::agent_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
-        // Ensure agent session exists (starts claude by default)
-        let _ = tmux::ensure_agent_session(&ws.branch, worktree_path, "claude");
+        let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
+        let _ = tmux::ensure_agent_session(&ws.branch, worktree_path, agent_cmd);
         // Attach right pane to agent session
-        let attach_cmd = format!("tmux attach -t '{}'", agent_session);
+        let attach_cmd = format!("tmux attach -t {}", shell_quote(&agent_session));
         let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &attach_cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
@@ -319,7 +319,7 @@ fn action_agent(state: &TuiState) {
 
 fn action_terminal(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
-        let cmd = format!("cd '{}' && exec $SHELL", ws.path);
+        let cmd = format!("cd {} && exec $SHELL", shell_quote(&ws.path));
         let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
@@ -330,7 +330,7 @@ fn action_editor(state: &TuiState) {
         let editor = std::env::var("EDITOR")
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| "vi".to_string());
-        let cmd = format!("{} '{}'", editor, ws.path);
+        let cmd = format!("{} {}", shell_quote(&editor), shell_quote(&ws.path));
         let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
@@ -373,9 +373,16 @@ fn format_age(last_activity: Option<&str>) -> String {
 }
 
 fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
+    if s.chars().count() <= max {
         s.to_string()
     } else {
-        format!("{}…", &s[..max.saturating_sub(1)])
+        let cut: String = s.chars().take(max.saturating_sub(1)).collect();
+        format!("{}…", cut)
     }
+}
+
+/// Wrap a string in single quotes with internal single quotes escaped.
+/// Safe for embedding in POSIX shell command strings.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r#"'"'"'"#))
 }

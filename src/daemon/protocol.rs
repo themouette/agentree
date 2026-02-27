@@ -42,4 +42,6 @@ pub struct WorkspaceInfo {
     pub files_changed: u32,
     /// RFC3339 timestamp of last git commit in the workspace
     pub last_activity: Option<String>,
+    /// Resolved agent binary to use for this workspace (from config, or None)
+    pub agent_bin: Option<String>,
 }

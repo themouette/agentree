@@ -10,13 +10,13 @@ use crate::utils::git::get_git_root;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-const DASHBOARD_SESSION: &str = "agentree-dashboard";
+pub const DASHBOARD_SESSION: &str = "agentree-dashboard";
 const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Entry point for `agentree dashboard`
 pub fn execute(tui_mode: bool) -> Result<()> {
     let sock_path = daemon::socket_path()
-        .ok_or_else(|| AgentreeError::Git("Could not determine home directory".to_string()))?;
+        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
 
     if tui_mode {
         // We are the TUI process running inside the left pane
@@ -31,7 +31,7 @@ pub fn execute(tui_mode: bool) -> Result<()> {
 
     // Detect repo root for daemon startup
     let repo_root = get_git_root()?
-        .ok_or_else(|| AgentreeError::Git("Not inside a git repository".to_string()))?;
+        .ok_or_else(|| AgentreeError::DaemonError("Not inside a git repository".to_string()))?;
 
     // Ensure the daemon is running
     ensure_daemon(&sock_path, &repo_root)?;
@@ -79,6 +79,10 @@ fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
+    // Note: there is a benign TOCTOU race here — two simultaneous `agentree dashboard`
+    // invocations can both fail try_connect() and both attempt to spawn a daemon.
+    // The second spawn will fail to bind the socket; both processes will then
+    // successfully connect to the first daemon once it is ready.
     std::process::Command::new(&agentree_bin)
         .arg("daemon")
         .arg("--repo-root")
@@ -87,7 +91,7 @@ fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| AgentreeError::Git(format!("Failed to spawn daemon: {}", e)))?;
+        .map_err(|e| AgentreeError::DaemonError(format!("Failed to spawn daemon: {}", e)))?;
 
     // Poll for the socket to appear (up to DAEMON_START_TIMEOUT)
     let deadline = Instant::now() + DAEMON_START_TIMEOUT;

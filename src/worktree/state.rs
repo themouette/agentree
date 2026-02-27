@@ -14,7 +14,7 @@ pub struct WorktreeEntry {
 }
 
 /// Parse git worktree list --porcelain output into WorktreeEntry structs
-fn parse_porcelain_output(output: &str) -> Vec<WorktreeEntry> {
+pub fn parse_porcelain_output(output: &str) -> Vec<WorktreeEntry> {
     let mut entries = Vec::new();
 
     // Split on double newlines to get worktree blocks

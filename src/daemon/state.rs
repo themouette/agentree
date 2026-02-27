@@ -7,13 +7,19 @@ use std::sync::{Arc, Mutex};
 pub struct DaemonState {
     pub workspaces: Arc<Mutex<HashMap<String, WorkspaceInfo>>>,
     pub repo_root: PathBuf,
+    pub default_agent: Option<String>, // resolved from config at startup
 }
 
 impl DaemonState {
     pub fn new(repo_root: PathBuf) -> Self {
+        let default_agent = crate::config::load(&repo_root)
+            .ok()
+            .and_then(|c| c.resolve_agent(None).ok())
+            .map(|(bin, _)| bin);
         DaemonState {
             workspaces: Arc::new(Mutex::new(HashMap::new())),
             repo_root,
+            default_agent,
         }
     }
 
@@ -28,7 +34,7 @@ impl DaemonState {
         map.clear();
 
         for (branch, path) in worktrees {
-            let info = build_workspace_info(&branch, &path);
+            let info = build_workspace_info(&branch, &path, self.default_agent.as_deref());
             map.insert(branch, info);
         }
 
@@ -46,7 +52,7 @@ impl DaemonState {
         };
 
         if let Some(path) = path {
-            let info = build_workspace_info(branch, &path);
+            let info = build_workspace_info(branch, &path, self.default_agent.as_deref());
             if let Ok(mut map) = self.workspaces.lock() {
                 map.insert(branch.to_string(), info);
             }
@@ -72,7 +78,7 @@ impl DaemonState {
                 std::fs::remove_file(&attention_file).map_err(AgentreeError::Io)?;
             }
             // Update cached info
-            let mut info = build_workspace_info(branch, &path);
+            let mut info = build_workspace_info(branch, &path, self.default_agent.as_deref());
             info.attention = None;
             if let Ok(mut map) = self.workspaces.lock() {
                 map.insert(branch.to_string(), info);
@@ -135,48 +141,18 @@ fn list_worktrees_for_repo(repo_root: &Path) -> Vec<(String, PathBuf)> {
     match output {
         Ok(o) if o.status.success() => {
             let text = String::from_utf8_lossy(&o.stdout);
-            parse_worktree_porcelain(&text)
+            use crate::worktree::state::parse_porcelain_output;
+            parse_porcelain_output(&text)
+                .into_iter()
+                .skip(1) // skip main repo entry
+                .filter_map(|e| e.branch.map(|b| (b, e.path)))
+                .collect()
         }
         _ => vec![],
     }
 }
 
-fn parse_worktree_porcelain(output: &str) -> Vec<(String, PathBuf)> {
-    let mut result = Vec::new();
-    let mut skip_first = true;
-
-    for block in output.split("\n\n") {
-        if block.trim().is_empty() {
-            continue;
-        }
-
-        if skip_first {
-            // First block is always the main repo — skip it
-            skip_first = false;
-            continue;
-        }
-
-        let mut path: Option<PathBuf> = None;
-        let mut branch: Option<String> = None;
-
-        for line in block.lines() {
-            if let Some(p) = line.strip_prefix("worktree ") {
-                path = Some(PathBuf::from(p));
-            } else if let Some(b) = line.strip_prefix("branch ") {
-                let name = b.strip_prefix("refs/heads/").unwrap_or(b);
-                branch = Some(name.to_string());
-            }
-        }
-
-        if let (Some(p), Some(b)) = (path, branch) {
-            result.push((b, p));
-        }
-    }
-
-    result
-}
-
-fn build_workspace_info(branch: &str, path: &Path) -> WorkspaceInfo {
+fn build_workspace_info(branch: &str, path: &Path, agent_bin: Option<&str>) -> WorkspaceInfo {
     WorkspaceInfo {
         branch: branch.to_string(),
         path: path.to_string_lossy().to_string(),
@@ -185,6 +161,7 @@ fn build_workspace_info(branch: &str, path: &Path) -> WorkspaceInfo {
         commits_ahead: get_commits_ahead(path),
         files_changed: get_files_changed(path),
         last_activity: get_last_activity(path),
+        agent_bin: agent_bin.map(str::to_string),
     }
 }
 
@@ -223,21 +200,15 @@ fn get_commits_ahead(path: &Path) -> u32 {
 fn get_files_changed(path: &Path) -> u32 {
     let path_str = path.to_string_lossy();
     let output = std::process::Command::new("git")
-        .args(["-C", &path_str, "diff", "--shortstat"])
+        .args(["-C", &path_str, "status", "--porcelain"])
         .output();
 
     match output {
         Ok(o) if o.status.success() => {
-            let text = String::from_utf8_lossy(&o.stdout);
-            let text = text.trim();
-            if text.is_empty() {
-                return 0;
-            }
-            // Format: "N file(s) changed, ..."
-            text.split_whitespace()
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0)
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .count() as u32
         }
         _ => 0,
     }

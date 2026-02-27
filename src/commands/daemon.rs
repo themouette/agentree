@@ -22,7 +22,7 @@ pub fn execute(args: DaemonArgs) -> Result<()> {
 
     // Check for a stale PID file and warn if another daemon is likely running
     if let Some(pid_file) = daemon::pid_path() {
-        if pid_file.exists() && daemon::check_stale_pid(&pid_file) {
+        if pid_file.exists() && daemon::is_daemon_running(&pid_file) {
             eprintln!("Warning: another agentree daemon appears to be running.");
             eprintln!("If this is stale, remove: {}", pid_file.display());
             return Ok(());

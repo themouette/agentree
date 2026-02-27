@@ -97,6 +97,9 @@ pub enum AgentreeError {
     #[error("Failed to check for updates: {0}")]
     UpdateCheckFailed(String),
 
+    #[error("Daemon error: {0}")]
+    DaemonError(String),
+
     #[error("Docker daemon is not running. Please start Docker Desktop and try again.\nCheck status with: docker info")]
     DockerNotRunning,
 

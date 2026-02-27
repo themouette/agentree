@@ -5,9 +5,10 @@ pub mod watcher;
 use crate::daemon::protocol::{Request, Response};
 use crate::daemon::state::DaemonState;
 use crate::error::{AgentreeError, Result};
+use notify::RecommendedWatcher;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::UnixListener;
 use tokio::time::{interval, Duration};
 
@@ -29,7 +30,7 @@ pub fn pid_path() -> Option<PathBuf> {
 /// Run the daemon (blocking — consumes the calling thread via tokio runtime).
 pub async fn run(repo_root: PathBuf) -> Result<()> {
     let runtime_dir = runtime_dir()
-        .ok_or_else(|| AgentreeError::Git("Could not determine home directory".to_string()))?;
+        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
 
     std::fs::create_dir_all(&runtime_dir).map_err(AgentreeError::Io)?;
 
@@ -57,27 +58,27 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
         .map(|(_, p)| p)
         .collect();
 
-    let _watcher = watcher::start_watcher(paths_to_watch, watcher_tx.clone())
-        .map_err(|e| AgentreeError::Git(format!("File watcher error: {}", e)))?;
+    let raw_watcher = watcher::start_watcher(paths_to_watch, watcher_tx.clone())
+        .map_err(|e| AgentreeError::DaemonError(format!("File watcher error: {}", e)))?;
+    let shared_watcher: Arc<Mutex<RecommendedWatcher>> = Arc::new(Mutex::new(raw_watcher));
 
     // Periodic re-scan task (every 30s to pick up new worktrees)
     let state_rescan = Arc::clone(&state);
-    let watcher_tx_rescan = watcher_tx.clone();
+    let watcher_rescan = Arc::clone(&shared_watcher);
     tokio::spawn(async move {
         let mut tick = interval(Duration::from_secs(30));
         tick.tick().await; // skip first immediate tick
         loop {
             tick.tick().await;
             let _ = state_rescan.refresh_all();
-            // Re-submit watch paths for any new worktrees
-            // (The watcher already handles NotFound gracefully)
-            let paths: Vec<PathBuf> = state_rescan
+            // Add any new worktree .agentree/ paths to the file watcher
+            let new_paths: Vec<PathBuf> = state_rescan
                 .get_all_agentree_paths()
                 .into_iter()
                 .map(|(_, p)| p)
                 .collect();
-            for p in paths {
-                let _ = watcher_tx_rescan.try_send(p);
+            if let Ok(mut w) = watcher_rescan.lock() {
+                watcher::add_watch_paths(&mut w, &new_paths);
             }
         }
     });
@@ -94,7 +95,7 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
 
     // Bind Unix socket and accept connections
     let listener = UnixListener::bind(&sock_path)
-        .map_err(|e| AgentreeError::Git(format!("Failed to bind socket: {}", e)))?;
+        .map_err(|e| AgentreeError::DaemonError(format!("Failed to bind socket: {}", e)))?;
 
     eprintln!("agentree daemon listening on {}", sock_path.display());
 
@@ -102,7 +103,7 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
         let (stream, _) = listener
             .accept()
             .await
-            .map_err(|e| AgentreeError::Git(format!("Accept error: {}", e)))?;
+            .map_err(|e| AgentreeError::DaemonError(format!("Accept error: {}", e)))?;
 
         let state_conn = Arc::clone(&state);
         tokio::spawn(async move {
@@ -112,7 +113,9 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
 }
 
 async fn handle_connection(stream: tokio::net::UnixStream, state: Arc<DaemonState>) {
-    // Convert to std stream for synchronous JSON line I/O
+    // We convert to std stream for synchronous line I/O. This is acceptable because
+    // the protocol is one-shot (one request → one response) and all state operations
+    // are in-memory. Blocking the task briefly is not a concern here.
     let std_stream = match stream.into_std() {
         Ok(s) => s,
         Err(_) => return,
@@ -155,17 +158,20 @@ fn handle_request(request: Request, state: &DaemonState) -> Response {
 }
 
 fn write_response(stream: &mut impl Write, response: &Response) -> std::io::Result<()> {
-    let json = serde_json::to_string(response).unwrap_or_else(|_| r#""Err":"serialize""#.into());
+    let json = serde_json::to_string(response)
+        .unwrap_or_else(|_| r#"{"Err":"serialize"}"#.into());
     stream.write_all(json.as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()
 }
 
-/// Check if a daemon is already running by reading the PID file
-pub fn check_stale_pid(pid_file: &Path) -> bool {
+/// Check if a daemon is already running by reading the PID file.
+///
+/// Returns `true` if the process identified by the PID file is alive.
+/// `kill -0` checks process existence without sending a signal.
+pub fn is_daemon_running(pid_file: &Path) -> bool {
     if let Ok(content) = std::fs::read_to_string(pid_file) {
         if let Ok(pid) = content.trim().parse::<u32>() {
-            // Check if the process is still alive (Unix: send signal 0)
             #[cfg(unix)]
             {
                 let status = std::process::Command::new("kill")
