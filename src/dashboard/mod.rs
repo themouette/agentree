@@ -7,6 +7,8 @@ use crate::dashboard::client::{try_connect, DaemonClient};
 use crate::dashboard::tmux as tmux_util;
 use crate::error::{AgentreeError, Result};
 use crate::utils::git::get_git_root;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -67,22 +69,34 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     tmux_util::attach(DASHBOARD_SESSION)
 }
 
-/// Ensure the daemon is running, starting it if necessary
+/// Ensure the daemon is running, starting it if necessary.
+///
+/// Progress display is TTY-aware:
+/// - Interactive terminal: spinner + "Starting agentree daemon..." (cleared on success)
+/// - Non-TTY (piped / CI): prints "Starting agentree daemon..." once, then polls silently
+///
+/// On timeout, returns DaemonStartFailed with the log file path.
 fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
     if try_connect(sock_path) {
         return Ok(());
     }
 
+    // Determine log path for error messages
+    let log_path = crate::daemon::runtime_dir()
+        .map(|d| d.join("daemon.log"))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.agentree/daemon.log".to_string());
+
     // Spawn the daemon in the background
+    // Note: stdout/stderr are intentionally left as null here. The daemon itself
+    // redirects its output to daemon.log via init_logging() in commands/daemon.rs.
     let agentree_bin = std::env::current_exe()
         .unwrap_or_else(|_| PathBuf::from("agentree"))
         .to_string_lossy()
         .to_string();
 
-    // Note: there is a benign TOCTOU race here — two simultaneous `agentree dashboard`
-    // invocations can both fail try_connect() and both attempt to spawn a daemon.
-    // The second spawn will fail to bind the socket; both processes will then
-    // successfully connect to the first daemon once it is ready.
+    // TOCTOU note: two simultaneous dashboard invocations may both spawn a daemon.
+    // The second daemon will fail to bind the socket; both will connect to the first.
     std::process::Command::new(&agentree_bin)
         .arg("daemon")
         .arg("--repo-root")
@@ -93,14 +107,39 @@ fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
         .spawn()
         .map_err(|e| AgentreeError::DaemonError(format!("Failed to spawn daemon: {}", e)))?;
 
-    // Poll for the socket to appear (up to DAEMON_START_TIMEOUT)
+    // TTY-aware progress display
+    let spinner: Option<ProgressBar> = if std::io::stderr().is_terminal() {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .expect("valid template"),
+        );
+        pb.set_message("Starting agentree daemon...");
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        Some(pb)
+    } else {
+        // No TTY: print static line once, then poll silently
+        eprintln!("Starting agentree daemon...");
+        None
+    };
+
+    // Poll for socket (5s timeout, 50ms interval)
     let deadline = Instant::now() + DAEMON_START_TIMEOUT;
     while Instant::now() < deadline {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(50));
         if try_connect(sock_path) {
+            if let Some(pb) = spinner {
+                pb.finish_and_clear();
+            }
             return Ok(());
         }
     }
 
-    Err(AgentreeError::DaemonNotRunning)
+    // Timeout: clear spinner, return actionable error
+    if let Some(pb) = spinner {
+        pb.finish_and_clear();
+    }
+
+    Err(AgentreeError::DaemonStartFailed { log_path })
 }
