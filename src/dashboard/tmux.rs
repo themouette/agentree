@@ -33,9 +33,23 @@ pub fn create_session(name: &str, cmd: &str, cwd: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Get the index of the first window in a session.
+/// Handles non-default base-index values in user tmux configs.
+/// Returns 0 on error (safe fallback for standard configurations).
+fn first_window_index(session: &str) -> u8 {
+    Command::new("tmux")
+        .args(["list-windows", "-t", session, "-F", "#{window_index}"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.lines().next().and_then(|l| l.trim().parse::<u8>().ok()))
+        .unwrap_or(0)
+}
+
 /// Split the current window horizontally (creates right pane)
 pub fn split_horizontal(session: &str) -> Result<()> {
-    let target = format!("{}:0", session);
+    let window = first_window_index(session);
+    let target = format!("{}:{}", session, window);
     let status = Command::new("tmux")
         .args(["split-window", "-h", "-t", &target])
         .status()
@@ -51,7 +65,8 @@ pub fn split_horizontal(session: &str) -> Result<()> {
 
 /// Resize pane to a fixed column width
 pub fn resize_pane(session: &str, pane: u8, width: u16) -> Result<()> {
-    let target = format!("{}:0.{}", session, pane);
+    let window = first_window_index(session);
+    let target = format!("{}:{}.{}", session, window, pane);
     Command::new("tmux")
         .args([
             "resize-pane",
@@ -67,7 +82,8 @@ pub fn resize_pane(session: &str, pane: u8, width: u16) -> Result<()> {
 
 /// Kill existing command in pane and respawn with new command
 pub fn respawn_pane(session: &str, pane: u8, cmd: &str) -> Result<()> {
-    let target = format!("{}:0.{}", session, pane);
+    let window = first_window_index(session);
+    let target = format!("{}:{}.{}", session, window, pane);
     let status = Command::new("tmux")
         .args(["respawn-pane", "-k", "-t", &target, cmd])
         .status()
@@ -84,7 +100,8 @@ pub fn respawn_pane(session: &str, pane: u8, cmd: &str) -> Result<()> {
 
 /// Select (focus) a pane
 pub fn select_pane(session: &str, pane: u8) -> Result<()> {
-    let target = format!("{}:0.{}", session, pane);
+    let window = first_window_index(session);
+    let target = format!("{}:{}.{}", session, window, pane);
     Command::new("tmux")
         .args(["select-pane", "-t", &target])
         .status()
@@ -112,9 +129,19 @@ pub fn attach(session: &str) -> Result<()> {
     Err(AgentreeError::TmuxNotFound)
 }
 
+/// Enable focus-events so panes receive FocusIn/FocusOut terminal sequences.
+/// Without this, tmux silently drops focus events and TUI focus tracking doesn't work.
+/// This sets the global option; it is safe and benign if already enabled.
+pub fn enable_focus_events() {
+    let _ = Command::new("tmux")
+        .args(["set-option", "-g", "focus-events", "on"])
+        .output();
+}
+
 /// Bind Ctrl+\ (session-scoped) to return focus to pane 0 of the dashboard session
 pub fn bind_key_return_to_dashboard(session: &str) {
-    let pane = format!("{}:0.0", session);
+    let window = first_window_index(session);
+    let pane = format!("{}:{}.0", session, window);
     // Bind as a global key (no prefix) for simplicity
     let _ = Command::new("tmux")
         .args(["bind-key", "-n", r"C-\", "select-pane", "-t", &pane])
@@ -128,13 +155,78 @@ pub fn agent_session_name(branch: &str) -> String {
     format!("agentree:{}", safe)
 }
 
+/// Run a command in the right pane (pane 1) of the dashboard session.
+///
+/// If pane 1 exists, kills the current process and respawns with the new command.
+/// If the user closed pane 1 (e.g. typed `exit`), recreates it via split-window
+/// and resizes the left pane back to 44 columns.
+pub fn run_in_right_pane(session: &str, cmd: &str) -> Result<()> {
+    let window = first_window_index(session);
+    let right_target = format!("{}:{}.1", session, window);
+
+    // Probe pane 1 — success means it exists, failure means it was closed
+    let pane_exists = Command::new("tmux")
+        .args(["display-message", "-t", &right_target, "-p", "#{pane_id}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if pane_exists {
+        respawn_pane(session, 1, cmd)
+    } else {
+        // Right pane was closed — split first (empty pane), then respawn the command.
+        // Passing the command directly to split-window is unreliable; two-step is safer.
+        let window_target = format!("{}:{}", session, window);
+        // -d: don't change active pane (TUI keeps focus during setup)
+        let status = Command::new("tmux")
+            .args(["split-window", "-h", "-d", "-t", &window_target])
+            .status()
+            .map_err(|e| AgentreeError::TmuxError(format!("split-window failed: {}", e)))?;
+        if !status.success() {
+            return Err(AgentreeError::TmuxError(
+                "tmux split-window failed".to_string(),
+            ));
+        }
+        // Run the desired command in the new pane
+        respawn_pane(session, 1, cmd)?;
+        // Restore the left pane to its 44-column width (split halved it)
+        resize_pane(session, 0, 44)?;
+        Ok(())
+    }
+}
+
+/// Resize the calling pane to 44 columns using $TMUX_PANE.
+///
+/// Only call this when the right pane (pane 1) exists. When only one pane
+/// is present, resize-pane shrinks the entire tmux window, leaving no space
+/// for the right pane when it is later recreated.
+pub fn resize_self_to_44_cols() {
+    if let Ok(pane_id) = std::env::var("TMUX_PANE") {
+        let _ = Command::new("tmux")
+            .args(["resize-pane", "-x", "44", "-t", &pane_id])
+            .output();
+    }
+}
+
+/// Returns true if the right pane (pane 1) exists in the session.
+pub fn right_pane_exists(session: &str) -> bool {
+    let window = first_window_index(session);
+    let target = format!("{}:{}.1", session, window);
+    Command::new("tmux")
+        .args(["display-message", "-t", &target, "-p", "#{pane_id}"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Returns true if pane 0 in the given session's window 0 has its process exited.
 ///
 /// Uses `tmux list-panes -F '#{pane_dead}'` which outputs "1" for dead panes.
 ///
 /// Assumes pane-base-index 0 (tmux default). Users with pane-base-index 1 will need to adjust.
 pub fn is_tui_pane_dead(session: &str) -> bool {
-    let target = format!("{}:0", session);
+    let window = first_window_index(session);
+    let target = format!("{}:{}", session, window);
     let output = Command::new("tmux")
         .args(["list-panes", "-t", &target, "-F", "#{pane_dead}"])
         .output();

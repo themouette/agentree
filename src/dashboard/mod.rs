@@ -78,11 +78,16 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
     tmux_util::create_session(DASHBOARD_SESSION, &shell, &repo_root)?;
 
+    // Enable focus-events so the TUI receives FocusLost/FocusGained when the
+    // user switches panes. tmux disables this by default.
+    tmux_util::enable_focus_events();
+
     // Split into two horizontal panes
     tmux_util::split_horizontal(DASHBOARD_SESSION)?;
 
-    // Set left pane to 44 columns
-    tmux_util::resize_pane(DASHBOARD_SESSION, 0, 44)?;
+    // Note: resize_pane(0, 44) is NOT called here — the session is still detached
+    // so tmux doesn't know the real terminal width. The TUI resizes itself to 44 cols
+    // on the first Event::Resize it receives (which fires when the client attaches).
 
     // Start TUI in the left pane
     tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;

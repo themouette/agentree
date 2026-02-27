@@ -147,6 +147,15 @@ fn run_event_loop(
                 Event::FocusGained => {
                     state.focused = true;
                 }
+                Event::Resize(_, _) => {
+                    // Restore 44-col width only when the right pane exists.
+                    // When pane 1 just closed, we are the only pane — resizing
+                    // would shrink the entire tmux window to 44 cols, leaving no
+                    // space when the right pane is recreated.
+                    if tmux::right_pane_exists(DASHBOARD_SESSION) {
+                        tmux::resize_self_to_44_cols();
+                    }
+                }
                 _ => {}
             }
         }
@@ -400,9 +409,8 @@ fn action_agent(state: &TuiState) {
         let worktree_path = std::path::Path::new(&ws.path);
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
         let _ = tmux::ensure_agent_session(&ws.branch, worktree_path, agent_cmd);
-        // Attach right pane to agent session
         let attach_cmd = format!("tmux attach -t {}", shell_quote(&agent_session));
-        let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &attach_cmd);
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &attach_cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
 }
@@ -410,7 +418,7 @@ fn action_agent(state: &TuiState) {
 fn action_terminal(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
         let cmd = format!("cd {} && exec $SHELL", shell_quote(&ws.path));
-        let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &cmd);
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
 }
@@ -421,7 +429,7 @@ fn action_editor(state: &TuiState) {
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| "vi".to_string());
         let cmd = format!("{} {}", shell_quote(&editor), shell_quote(&ws.path));
-        let _ = tmux::respawn_pane(DASHBOARD_SESSION, 1, &cmd);
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &cmd);
         let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
     }
 }
