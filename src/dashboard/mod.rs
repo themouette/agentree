@@ -26,6 +26,20 @@ pub fn execute(tui_mode: bool) -> Result<()> {
         return ui::run_tui(client);
     }
 
+    // Check if already inside a tmux session and warn the user
+    if std::env::var("TMUX").is_ok() {
+        eprint!("You are already inside tmux. Nest? [y/N] ");
+        use std::io::BufRead;
+        let mut line = String::new();
+        let stdin = std::io::stdin();
+        stdin.lock().read_line(&mut line).ok();
+        let answer = line.trim().to_lowercase();
+        if answer != "y" && answer != "yes" {
+            return Ok(()); // User said no — exit cleanly
+        }
+        // User said yes — proceed with nesting
+    }
+
     // Ensure tmux is installed
     if !tmux_util::is_available() {
         return Err(AgentreeError::TmuxNotFound);
@@ -38,32 +52,46 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     // Ensure the daemon is running
     ensure_daemon(&sock_path, &repo_root)?;
 
-    // Create or reuse the tmux session
-    if !tmux_util::session_exists(DASHBOARD_SESSION) {
-        // Start session with a placeholder shell; TUI will be loaded via respawn-pane
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
-        tmux_util::create_session(DASHBOARD_SESSION, &shell, &repo_root)?;
+    // Compute the agentree binary path once (used in both session paths)
+    let agentree_bin = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("agentree"))
+        .to_string_lossy()
+        .to_string();
+    let tui_cmd = format!("{} dashboard --tui", agentree_bin);
 
-        // Split into two horizontal panes
-        tmux_util::split_horizontal(DASHBOARD_SESSION)?;
+    // DMN-04: handle_request() in daemon/mod.rs: Request::List => Response::Workspaces(state.snapshot())
+    // DMN-05: watcher.rs watches .agentree/ dir; fires on status.json changes → state.update_workspace()
+    // DMN-06: same watcher fires on attention.md changes → state.update_workspace() → read_attention()
+    // DMN-07: daemon/mod.rs lines 79-93: tokio::time::interval(30s) loop → state.refresh_all()
+    // All four are already implemented. No code changes needed for DMN-04..07.
 
-        // Set left pane to 44 columns
-        tmux_util::resize_pane(DASHBOARD_SESSION, 0, 44)?;
-
-        // Start TUI in the left pane
-        let agentree_bin = std::env::current_exe()
-            .unwrap_or_else(|_| PathBuf::from("agentree"))
-            .to_string_lossy()
-            .to_string();
-        let tui_cmd = format!("{} dashboard --tui", agentree_bin);
-        tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;
-
-        // Bind Ctrl+\ to return to left pane
-        tmux_util::bind_key_return_to_dashboard(DASHBOARD_SESSION);
-
-        // Select right pane initially (user will navigate to left pane for list)
-        tmux_util::select_pane(DASHBOARD_SESSION, 0)?;
+    if tmux_util::session_exists(DASHBOARD_SESSION) {
+        // Session exists — check if TUI pane (pane 0) is dead and relaunch if needed
+        if tmux_util::is_tui_pane_dead(DASHBOARD_SESSION) {
+            tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;
+        }
+        // Silently attach (no output per CONTEXT.md design)
+        return tmux_util::attach(DASHBOARD_SESSION);
     }
+
+    // Session does not exist — create it
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    tmux_util::create_session(DASHBOARD_SESSION, &shell, &repo_root)?;
+
+    // Split into two horizontal panes
+    tmux_util::split_horizontal(DASHBOARD_SESSION)?;
+
+    // Set left pane to 44 columns
+    tmux_util::resize_pane(DASHBOARD_SESSION, 0, 44)?;
+
+    // Start TUI in the left pane
+    tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;
+
+    // Bind Ctrl+\ to return to left pane
+    tmux_util::bind_key_return_to_dashboard(DASHBOARD_SESSION);
+
+    // Select left pane initially
+    tmux_util::select_pane(DASHBOARD_SESSION, 0)?;
 
     // Attach to the session (replaces current process)
     tmux_util::attach(DASHBOARD_SESSION)
