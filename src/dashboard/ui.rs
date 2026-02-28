@@ -485,7 +485,9 @@ fn action_editor(state: &mut TuiState) {
         let worktree_path = std::path::Path::new(&ws.path);
         // Open editor in workspace directory; split-window -c handles the cwd
         let edit_cmd = format!("{} .", shell_quote(&editor));
-        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path);
+        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path) {
+            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        }
     }
 }
 
