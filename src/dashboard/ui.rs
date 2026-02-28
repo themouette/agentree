@@ -108,6 +108,14 @@ fn run_event_loop(
 ) -> Result<()> {
     loop {
         state.frame = state.frame.wrapping_add(1);
+
+        // Clear expired status message at start of each frame
+        if let Some((_, shown_at)) = &state.status_message {
+            if shown_at.elapsed() >= std::time::Duration::from_secs(3) {
+                state.status_message = None;
+            }
+        }
+
         terminal
             .draw(|f| render(f, state))
             .map_err(crate::error::AgentreeError::Io)?;
@@ -251,13 +259,14 @@ fn render_connection_lost(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
 }
 
 fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
-    // Split into: header line + list area + help bar at the bottom
+    // Split into: header line + list area + status bar + help bar at the bottom
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(3),
+            Constraint::Length(1),   // header
+            Constraint::Fill(1),     // list
+            Constraint::Length(1),   // status bar (1 line, hidden when empty)
+            Constraint::Length(3),   // help bar
         ])
         .split(area);
 
@@ -294,20 +303,31 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         // Available width: inner[1].width minus 2 for borders
         let list_width = inner[1].width.saturating_sub(2) as usize;
         // Layout within each row (approximate):
-        // robot(2) + space(1) + attention(2) + branch(variable) + stats + age(7)
-        // Reserve: robot=2, attention=2, stats=8 (↑N ±N), age=7, spaces=3
-        let branch_width = list_width.saturating_sub(2 + 2 + 8 + 7 + 3).max(6);
+        // " 🤖 "(4) + ">_ "(3) + "E "(2) + attention(2) + branch(variable) + stats(8) + age(7) + spaces(3)
+        // robot=4 (space+emoji+space = 4 visible), term=3, edit=2, attention=2, stats=8, age=7, spaces=3
+        let branch_width = list_width.saturating_sub(4 + 3 + 2 + 2 + 8 + 7 + 3).max(6);
 
         let items: Vec<ListItem> = state
             .workspaces
             .iter()
             .enumerate()
             .map(|(i, ws)| {
-                let agent_running =
-                    tmux::session_exists(&tmux::agent_session_name(&ws.branch));
+                let agent_running = tmux::session_exists(&tmux::agent_session_name(&ws.branch));
+                let term_running = tmux::session_exists(&tmux::terminal_session_name(&ws.branch));
+                let edit_running = tmux::session_exists(&tmux::editor_session_name(&ws.branch));
 
                 // Robot icon: green if agent running, DarkGray otherwise
                 let robot_style = if agent_running {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                let term_style = if term_running {
+                    Style::default().fg(Color::Green)
+                } else {
+                    Style::default().fg(Color::DarkGray)
+                };
+                let edit_style = if edit_running {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default().fg(Color::DarkGray)
@@ -342,6 +362,8 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
 
                 let spans = vec![
                     Span::styled(" \u{1F916} ", robot_style),
+                    Span::styled(">_ ", term_style),
+                    Span::styled("E ", edit_style),
                     Span::styled(attention_str, attention_style),
                     Span::raw(format!("{:<width$} ", branch, width = branch_width)),
                     Span::styled(stats_str, Style::default().fg(Color::DarkGray)),
@@ -385,6 +407,16 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         f.render_stateful_widget(list, inner[1], &mut list_state);
     }
 
+    // ── status bar — show ephemeral messages (errors, confirmations) ──
+    let status_text = match &state.status_message {
+        Some((msg, shown_at)) if shown_at.elapsed() < std::time::Duration::from_secs(3) => {
+            Span::styled(format!(" {}", msg), Style::default().fg(Color::Red))
+        }
+        _ => Span::raw(""),
+    };
+    let status_bar = Paragraph::new(Line::from(vec![status_text]));
+    f.render_widget(status_bar, inner[2]);
+
     // ── help bar ──
     let help = Paragraph::new(Line::from(vec![
         Span::styled("[j/k]", Style::default().fg(Color::Yellow)),
@@ -406,7 +438,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
             .border_style(Style::default().fg(Color::DarkGray)),
     );
 
-    f.render_widget(help, inner[2]);
+    f.render_widget(help, inner[3]);
 }
 
 // ---------------------------------------------------------------------------
