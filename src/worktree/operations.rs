@@ -126,6 +126,104 @@ impl ForceLevel {
     }
 }
 
+/// Set up the .agentree/ workspace directory in a newly created worktree.
+///
+/// Creates the `.agentree/` directory, writes `CLAUDE.md` to the worktree root
+/// (only if none already exists), and attempts to exclude `.agentree/` from
+/// git tracking via the shared `info/exclude` file.
+fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
+    // 1. Create .agentree/ directory
+    std::fs::create_dir_all(worktree_path.join(".agentree")).map_err(AgentreeError::Io)?;
+
+    // 2. Write CLAUDE.md only if no CLAUDE.md exists in worktree root
+    let claude_md_path = worktree_path.join("CLAUDE.md");
+    if !claude_md_path.exists() {
+        std::fs::write(
+            &claude_md_path,
+            include_str!("../../templates/CLAUDE.md"),
+        )
+        .map_err(AgentreeError::Io)?;
+    }
+
+    // 3. Add .agentree/ to git exclude (non-critical, log warning on failure)
+    if let Err(e) = add_agentree_to_git_exclude(worktree_path) {
+        eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
+    }
+
+    Ok(())
+}
+
+/// Add `.agentree/` to the shared git `info/exclude` file so it is not tracked.
+///
+/// Resolves `$GIT_COMMON_DIR` from the worktree's `.git` file and `commondir`,
+/// then appends `.agentree/` to `$GIT_COMMON_DIR/info/exclude` if not already present.
+fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
+    // Read the .git file/directory in worktree_path
+    let git_path = worktree_path.join(".git");
+    if !git_path.exists() {
+        return Err(AgentreeError::Git(
+            "No .git file or directory found in worktree".to_string(),
+        ));
+    }
+
+    // Determine gitdir: if .git is a file, it's a worktree link; if a dir, it's the main repo
+    let gitdir = if git_path.is_file() {
+        let content = std::fs::read_to_string(&git_path).map_err(AgentreeError::Io)?;
+        // Content is like: "gitdir: /path/to/main/.git/worktrees/branch"
+        let line = content
+            .lines()
+            .next()
+            .ok_or_else(|| AgentreeError::Git("Empty .git file".to_string()))?;
+        let path_str = line
+            .strip_prefix("gitdir: ")
+            .ok_or_else(|| AgentreeError::Git(format!("Unexpected .git content: {}", line)))?
+            .trim();
+        PathBuf::from(path_str)
+    } else {
+        git_path.clone()
+    };
+
+    // Resolve common dir from gitdir/commondir file
+    let common_dir = {
+        let commondir_file = gitdir.join("commondir");
+        if commondir_file.exists() {
+            let rel = std::fs::read_to_string(&commondir_file).map_err(AgentreeError::Io)?;
+            let rel = rel.trim();
+            // rel is relative to gitdir; resolve canonically
+            let candidate = gitdir.join(rel);
+            candidate
+                .canonicalize()
+                .map_err(|e| AgentreeError::Io(e))?
+        } else {
+            // No commondir means gitdir IS the common dir (main repo case)
+            gitdir
+                .canonicalize()
+                .map_err(|e| AgentreeError::Io(e))?
+        }
+    };
+
+    // Ensure info/ directory exists
+    let info_dir = common_dir.join("info");
+    std::fs::create_dir_all(&info_dir).map_err(AgentreeError::Io)?;
+
+    // Read existing exclude file content
+    let exclude_path = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude_path).unwrap_or_default();
+
+    // Append if not already present
+    if !existing.lines().any(|line| line.trim() == ".agentree/") {
+        let append = if existing.ends_with('\n') || existing.is_empty() {
+            "# agentree status directory (local, not committed)\n.agentree/\n".to_string()
+        } else {
+            "\n# agentree status directory (local, not committed)\n.agentree/\n".to_string()
+        };
+        std::fs::write(&exclude_path, format!("{}{}", existing, append))
+            .map_err(AgentreeError::Io)?;
+    }
+
+    Ok(())
+}
+
 /// Remove an orphaned worktree directory if it exists
 ///
 /// An orphaned directory is one that exists on disk but is not tracked by git
@@ -332,6 +430,11 @@ pub fn create_worktree(
             run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
 
+            if let Err(e) = setup_agentree_workspace(&worktree_path) {
+                eprintln!("Warning: could not set up .agentree/ workspace: {}", e);
+                // Non-fatal: worktree was created, status protocol just won't work
+            }
+
             Ok(if is_remote_checkout {
                 CreateResult::CheckedOutFromRemote(worktree_path)
             } else {
@@ -362,6 +465,11 @@ pub fn create_worktree(
 
             run_git_command_no_timeout(&args, "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
+
+            if let Err(e) = setup_agentree_workspace(&worktree_path) {
+                eprintln!("Warning: could not set up .agentree/ workspace: {}", e);
+                // Non-fatal: worktree was created, status protocol just won't work
+            }
 
             Ok(CreateResult::CreatedWithBranch(worktree_path))
         }
