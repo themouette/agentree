@@ -259,14 +259,13 @@ fn render_connection_lost(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
 }
 
 fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
-    // Split into: header line + list area + status bar + help bar at the bottom
+    // Split into: header line + list area + footer (status + hints combined)
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),   // header
             Constraint::Fill(1),     // list
-            Constraint::Length(1),   // status bar (1 line, hidden when empty)
-            Constraint::Length(3),   // help bar
+            Constraint::Length(1),   // footer (status + hints combined)
         ])
         .split(area);
 
@@ -431,38 +430,31 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         f.render_stateful_widget(list, inner[1], &mut list_state);
     }
 
-    // ── status bar — show ephemeral messages (errors, confirmations) ──
-    let status_text = match &state.status_message {
+    // ── footer: status message (left) + key hints (right, abbreviated) ──
+    let status_part = match &state.status_message {
         Some((msg, shown_at)) if shown_at.elapsed() < std::time::Duration::from_secs(3) => {
-            Span::styled(format!(" {}", msg), Style::default().fg(Color::Red))
+            Span::styled(format!(" {} ", msg), Style::default().fg(Color::Red))
         }
-        _ => Span::raw(""),
+        _ => Span::raw(" "),
     };
-    let status_bar = Paragraph::new(Line::from(vec![status_text]));
-    f.render_widget(status_bar, inner[2]);
 
-    // ── help bar ──
-    let help = Paragraph::new(Line::from(vec![
-        Span::styled("[j/k]", Style::default().fg(Color::Yellow)),
-        Span::raw(" navigate  "),
-        Span::styled("[a]", Style::default().fg(Color::Yellow)),
-        Span::raw("gent  "),
-        Span::styled("[t]", Style::default().fg(Color::Yellow)),
-        Span::raw("erminal  "),
-        Span::styled("[e]", Style::default().fg(Color::Yellow)),
-        Span::raw("ditor  "),
-        Span::styled("[c]", Style::default().fg(Color::Yellow)),
-        Span::raw("lear  "),
-        Span::styled("[q]", Style::default().fg(Color::Yellow)),
-        Span::raw("etach"),
-    ]))
-    .block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-
-    f.render_widget(help, inner[3]);
+    let hints = Line::from(vec![
+        status_part,
+        Span::styled("j/k", Style::default().fg(Color::Yellow)),
+        Span::raw(" nav  "),
+        Span::styled("a", Style::default().fg(Color::Yellow)),
+        Span::raw(" agent  "),
+        Span::styled("t", Style::default().fg(Color::Yellow)),
+        Span::raw(" term  "),
+        Span::styled("e", Style::default().fg(Color::Yellow)),
+        Span::raw(" edit  "),
+        Span::styled("c", Style::default().fg(Color::Yellow)),
+        Span::raw(" clear  "),
+        Span::styled("q", Style::default().fg(Color::Yellow)),
+        Span::raw(" detach"),
+    ]);
+    let footer = Paragraph::new(hints).style(Style::default().fg(Color::DarkGray));
+    f.render_widget(footer, inner[2]);
 }
 
 // ---------------------------------------------------------------------------
