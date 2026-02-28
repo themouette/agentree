@@ -312,9 +312,9 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
             .iter()
             .enumerate()
             .map(|(i, ws)| {
-                let agent_running = tmux::session_exists(&tmux::agent_session_name(&ws.branch));
-                let term_running = tmux::session_exists(&tmux::terminal_session_name(&ws.branch));
-                let edit_running = tmux::session_exists(&tmux::editor_session_name(&ws.branch));
+                let agent_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::agent_session_name(&ws.branch));
+                let term_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::terminal_session_name(&ws.branch));
+                let edit_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::editor_session_name(&ws.branch));
 
                 // Robot icon: green if agent running, DarkGray otherwise
                 let robot_style = if agent_running {
@@ -447,44 +447,29 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
 
 fn action_agent(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
-        let agent_session = tmux::agent_session_name(&ws.branch);
+        let title = tmux::agent_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
-        let _ = tmux::ensure_named_session(&agent_session, agent_cmd, worktree_path);
-        // Use switch-client (not attach -t) to avoid nested tmux client
-        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&agent_session));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
-        // Do NOT call select_pane — the client has moved to the agent session
+        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path);
     }
 }
 
 fn action_terminal(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
-        let term_session = tmux::terminal_session_name(&ws.branch);
+        let title = tmux::terminal_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
-        // Resolve $SHELL in Rust so the embedded command doesn't depend on
-        // the tmux pane environment correctly inheriting $SHELL
+        // split-window -c sets the working directory, so just exec the shell
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let shell_cmd = format!(
-            "cd {} && exec {}",
-            shell_quote(&ws.path),
-            shell_quote(&shell)
-        );
-        let _ = tmux::ensure_named_session(&term_session, &shell_cmd, worktree_path);
-        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&term_session));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
-        // Do NOT call select_pane — the client has moved to the terminal session
+        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path);
     }
 }
 
 fn action_editor(state: &mut TuiState) {
     if let Some(ws) = state.selected_workspace().cloned() {
-        // Resolve editor in Rust — not in the tmux pane environment
         let editor = std::env::var("EDITOR")
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| "vi".to_string());
 
-        // Check that the resolved editor binary exists
         if which::which(&editor).is_err() {
             state.status_message = Some((
                 "No editor found — set $EDITOR".to_string(),
@@ -493,13 +478,11 @@ fn action_editor(state: &mut TuiState) {
             return;
         }
 
-        let edit_session = tmux::editor_session_name(&ws.branch);
+        let title = tmux::editor_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
-        let edit_cmd = format!("{} {}", shell_quote(&editor), shell_quote(&ws.path));
-        let _ = tmux::ensure_named_session(&edit_session, &edit_cmd, worktree_path);
-        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&edit_session));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
-        // Do NOT call select_pane — the client has moved to the editor session
+        // Open editor in workspace directory; split-window -c handles the cwd
+        let edit_cmd = format!("{} .", shell_quote(&editor));
+        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path);
     }
 }
 

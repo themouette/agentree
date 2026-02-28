@@ -374,6 +374,215 @@ pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> 
     Ok(())
 }
 
+const STASH_WINDOW: &str = "stash";
+
+/// Ensure the stash window exists in the dashboard session.
+///
+/// The stash window holds inactive action panes (agent, terminal, editor) while
+/// only one is shown at a time in the main window's right slot.
+pub fn ensure_stash_window(session: &str) -> Result<()> {
+    let out = Command::new("tmux")
+        .args(["list-windows", "-t", session, "-F", "#{window_name}"])
+        .output()
+        .map_err(|e| AgentreeError::TmuxError(format!("list-windows failed: {}", e)))?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    if stdout.lines().any(|l| l.trim() == STASH_WINDOW) {
+        return Ok(());
+    }
+    let out = Command::new("tmux")
+        .args(["new-window", "-d", "-n", STASH_WINDOW, "-t", session])
+        .output()
+        .map_err(|e| AgentreeError::TmuxError(format!("new-window stash failed: {}", e)))?;
+    if !out.status.success() {
+        return Err(AgentreeError::TmuxError(format!(
+            "tmux new-window (stash) failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Set the title of a tmux pane by its pane ID (e.g. "%3").
+fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
+    let out = Command::new("tmux")
+        .args(["select-pane", "-t", pane_id, "-T", title])
+        .output()
+        .map_err(|e| AgentreeError::TmuxError(format!("select-pane -T failed: {}", e)))?;
+    if !out.status.success() {
+        return Err(AgentreeError::TmuxError(format!(
+            "tmux select-pane -T failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    Ok(())
+}
+
+/// Find a pane in the stash window by its title. Returns the pane ID (e.g. "%3") if found.
+fn find_stash_pane(session: &str, title: &str) -> Option<String> {
+    let target = format!("{}:{}", session, STASH_WINDOW);
+    let out = Command::new("tmux")
+        .args(["list-panes", "-t", &target, "-F", "#{pane_id} #{pane_title}"])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    for line in stdout.lines() {
+        let mut parts = line.splitn(2, ' ');
+        let pane_id = parts.next()?;
+        let pane_title = parts.next()?.trim();
+        if pane_title == title {
+            return Some(pane_id.to_string());
+        }
+    }
+    None
+}
+
+/// Check whether a pane with the given title exists anywhere in the session.
+///
+/// Used for session icon indicators in the workspace list.
+pub fn pane_exists_in_session(session: &str, title: &str) -> bool {
+    Command::new("tmux")
+        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_title}"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.lines().any(|l| l.trim() == title))
+        .unwrap_or(false)
+}
+
+/// Show a named action pane in the right slot of the dashboard's main window.
+///
+/// Implements stash-based pane management:
+/// - Main window has two panes: left (TUI) and right (active action pane).
+/// - Stash window holds inactive panes, identified by title.
+/// - The current right pane (if any) is moved to stash, then the requested pane
+///   is moved from stash to main — or created fresh if it doesn't exist yet.
+///
+/// After this call, the right pane shows the requested content with keyboard focus.
+pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()> {
+    // 1. Ensure stash window exists
+    ensure_stash_window(session)?;
+
+    // 2. Snapshot main window pane layout
+    let main_panes = list_pane_ids(session);
+    let left_id = main_panes
+        .first()
+        .ok_or_else(|| AgentreeError::TmuxError("Dashboard main window has no panes".to_string()))?
+        .clone();
+
+    // 3. If a right pane exists, move it to stash
+    if main_panes.len() >= 2 {
+        let right_id = &main_panes[1];
+        let out = Command::new("tmux")
+            .args([
+                "join-pane", "-d", "-h",
+                "-s", right_id,
+                "-t", &format!("{}:{}", session, STASH_WINDOW),
+            ])
+            .output()
+            .map_err(|e| AgentreeError::TmuxError(format!("join-pane to stash failed: {}", e)))?;
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux join-pane to stash failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+    }
+
+    // 4. Find the requested pane in stash, or create it
+    let pane_to_show = if let Some(existing_id) = find_stash_pane(session, title) {
+        existing_id
+    } else {
+        // Stash window may have died if it was down to one pane and we just moved it.
+        // Recreate it before splitting.
+        ensure_stash_window(session)?;
+
+        let cwd_str = cwd.to_string_lossy();
+        let out = Command::new("tmux")
+            .args([
+                "split-window", "-d", "-P", "-F", "#{pane_id}",
+                "-t", &format!("{}:{}", session, STASH_WINDOW),
+                "-c", &cwd_str, cmd,
+            ])
+            .output()
+            .map_err(|e| AgentreeError::TmuxError(format!("split-window in stash failed: {}", e)))?;
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux split-window in stash failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        let new_pane_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        set_pane_title(&new_pane_id, title)?;
+        new_pane_id
+    };
+
+    // 5. Move the pane into the main window, to the right of the TUI pane
+    let out = Command::new("tmux")
+        .args(["join-pane", "-h", "-s", &pane_to_show, "-t", &left_id])
+        .output()
+        .map_err(|e| AgentreeError::TmuxError(format!("join-pane to main failed: {}", e)))?;
+    if !out.status.success() {
+        return Err(AgentreeError::TmuxError(format!(
+            "tmux join-pane to main failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+
+    // 6. Restore the TUI pane to its 44-column width
+    let _ = Command::new("tmux")
+        .args(["resize-pane", "-x", "44", "-t", &left_id])
+        .output();
+
+    // 7. Give keyboard focus to the right pane
+    focus_right_pane(session);
+
+    Ok(())
+}
+
+/// Give keyboard focus to the right pane of the main window.
+pub fn focus_right_pane(session: &str) {
+    let pane_ids = list_pane_ids(session);
+    if let Some(right_id) = pane_ids.get(1) {
+        let _ = Command::new("tmux")
+            .args(["select-pane", "-t", right_id])
+            .output();
+    }
+}
+
+/// Kill all stash panes belonging to a workspace branch.
+///
+/// Matches panes whose title starts with `agentree-{safe_branch}`.
+/// Called when a workspace is removed to clean up background panes.
+pub fn kill_workspace_panes(session: &str, branch: &str) {
+    let safe = branch.replace('/', "-").replace(':', "-");
+    let prefix = format!("agentree-{}", safe);
+
+    let pane_infos: Vec<(String, String)> = Command::new("tmux")
+        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_id} #{pane_title}"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| {
+            s.lines()
+                .filter_map(|line| {
+                    let mut parts = line.splitn(2, ' ');
+                    let pane_id = parts.next()?.to_string();
+                    let pane_title = parts.next()?.trim().to_string();
+                    Some((pane_id, pane_title))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for (pane_id, pane_title) in pane_infos {
+        if pane_title.starts_with(&prefix) {
+            let _ = Command::new("tmux")
+                .args(["kill-pane", "-t", &pane_id])
+                .output();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
