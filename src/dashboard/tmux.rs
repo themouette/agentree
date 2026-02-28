@@ -155,42 +155,102 @@ pub fn agent_session_name(branch: &str) -> String {
     format!("agentree:{}", safe)
 }
 
-/// Run a command in the right pane (pane 1) of the dashboard session.
+/// List pane IDs in visual (index) order for the first window of a session.
 ///
-/// If pane 1 exists, kills the current process and respawns with the new command.
-/// If the user closed pane 1 (e.g. typed `exit`), recreates it via split-window
-/// and resizes the left pane back to 44 columns.
-pub fn run_in_right_pane(session: &str, cmd: &str) -> Result<()> {
+/// Returns e.g. `["%0", "%1"]` — the first entry is the left (TUI) pane,
+/// the second is the right pane. Uses `#{pane_id}` which is unaffected by
+/// `pane-base-index` settings in the user's tmux config.
+fn list_pane_ids(session: &str) -> Vec<String> {
     let window = first_window_index(session);
-    let right_target = format!("{}:{}.1", session, window);
-
-    // Probe pane 1 — success means it exists, failure means it was closed
-    let pane_exists = Command::new("tmux")
-        .args(["display-message", "-t", &right_target, "-p", "#{pane_id}"])
+    let target = format!("{}:{}", session, window);
+    Command::new("tmux")
+        .args(["list-panes", "-t", &target, "-F", "#{pane_id}"])
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| {
+            s.lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
 
-    if pane_exists {
-        respawn_pane(session, 1, cmd)
+/// Run a command in the right pane of the dashboard session.
+///
+/// Uses pane IDs (not indices) so it works regardless of `pane-base-index`.
+/// If the right pane exists (≥2 panes), respawns it with the new command.
+/// If the user closed the right pane, recreates it by splitting $TMUX_PANE
+/// (our own pane) and resizes the left pane back to 44 columns.
+pub fn run_in_right_pane(session: &str, cmd: &str) -> Result<()> {
+    let pane_ids = list_pane_ids(session);
+
+    if pane_ids.len() >= 2 {
+        // Right pane exists — respawn it using its pane ID directly
+        let right_id = &pane_ids[1];
+        let out = Command::new("tmux")
+            .args(["respawn-pane", "-k", "-t", right_id, cmd])
+            .output()
+            .map_err(|e| AgentreeError::TmuxError(format!("respawn-pane failed: {}", e)))?;
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux respawn-pane failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+        Ok(())
     } else {
-        // Right pane was closed — split first (empty pane), then respawn the command.
-        // Passing the command directly to split-window is unreliable; two-step is safer.
-        let window_target = format!("{}:{}", session, window);
-        // -d: don't change active pane (TUI keeps focus during setup)
-        let status = Command::new("tmux")
-            .args(["split-window", "-h", "-d", "-t", &window_target])
-            .status()
+        // Right pane was closed — recreate it.
+        // Split $TMUX_PANE (our own pane ID) so we always split the correct pane
+        // regardless of pane-base-index or how tmux numbers things.
+        let split_target = std::env::var("TMUX_PANE").unwrap_or_else(|_| {
+            // Fallback: use first pane ID or window target
+            pane_ids
+                .first()
+                .cloned()
+                .unwrap_or_else(|| format!("{}:{}", session, first_window_index(session)))
+        });
+
+        let out = Command::new("tmux")
+            .args(["split-window", "-h", "-d", "-t", &split_target])
+            .output()
             .map_err(|e| AgentreeError::TmuxError(format!("split-window failed: {}", e)))?;
-        if !status.success() {
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux split-window failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+
+        // Re-query panes to get the new right pane ID
+        let new_ids = list_pane_ids(session);
+        if new_ids.len() < 2 {
             return Err(AgentreeError::TmuxError(
-                "tmux split-window failed".to_string(),
+                "split-window did not create a right pane".to_string(),
             ));
         }
-        // Run the desired command in the new pane
-        respawn_pane(session, 1, cmd)?;
+
+        let right_id = &new_ids[1];
+        let left_id = &new_ids[0];
+
+        // Run the desired command in the new right pane
+        let out = Command::new("tmux")
+            .args(["respawn-pane", "-k", "-t", right_id, cmd])
+            .output()
+            .map_err(|e| AgentreeError::TmuxError(format!("respawn-pane failed: {}", e)))?;
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux respawn-pane (new pane) failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
+
         // Restore the left pane to its 44-column width (split halved it)
-        resize_pane(session, 0, 44)?;
+        let _ = Command::new("tmux")
+            .args(["resize-pane", "-x", "44", "-t", left_id])
+            .output();
+
         Ok(())
     }
 }
@@ -208,15 +268,9 @@ pub fn resize_self_to_44_cols() {
     }
 }
 
-/// Returns true if the right pane (pane 1) exists in the session.
+/// Returns true if the right pane exists in the session (i.e. ≥ 2 panes present).
 pub fn right_pane_exists(session: &str) -> bool {
-    let window = first_window_index(session);
-    let target = format!("{}:{}.1", session, window);
-    Command::new("tmux")
-        .args(["display-message", "-t", &target, "-p", "#{pane_id}"])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    list_pane_ids(session).len() >= 2
 }
 
 /// Returns true if pane 0 in the given session's window 0 has its process exited.

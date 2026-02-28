@@ -120,8 +120,15 @@ fn run_event_loop(
             match event::read().map_err(crate::error::AgentreeError::Io)? {
                 Event::Key(key) => {
                     match (key.modifiers, key.code) {
-                        // Quit
-                        (_, KeyCode::Char('q')) | (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
+                        // Detach: put dashboard in background, session + TUI stay alive
+                        (_, KeyCode::Char('q')) => {
+                            let _ = std::process::Command::new("tmux")
+                                .args(["detach-client"])
+                                .status();
+                            // Don't break — TUI keeps running; `agentree dashboard` reattaches
+                        }
+                        // Force-quit: actually exit the TUI process
+                        (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
                             break;
                         }
                         // Navigation
@@ -388,7 +395,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         Span::styled("[c]", Style::default().fg(Color::Yellow)),
         Span::raw("lear  "),
         Span::styled("[q]", Style::default().fg(Color::Yellow)),
-        Span::raw("uit"),
+        Span::raw("etach"),
     ]))
     .block(
         Block::default()
