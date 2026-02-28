@@ -317,6 +317,63 @@ pub fn ensure_agent_session(branch: &str, worktree_path: &Path, agent_cmd: &str)
     Ok(())
 }
 
+/// Returns true if the named session's first pane process has exited (pane is dead).
+///
+/// Uses `tmux list-panes -F '#{pane_dead}'` which outputs "1" for dead panes.
+/// Returns false on any error — safe default prevents destroying live sessions.
+pub fn is_session_pane_dead(session: &str) -> bool {
+    Command::new("tmux")
+        .args(["list-panes", "-t", session, "-F", "#{pane_dead}"])
+        .output()
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .next()
+                .map(|l| l.trim() == "1")
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
+/// Ensure a named tmux session exists and its pane process is alive.
+///
+/// - If session does not exist: creates it running `cmd` in `cwd`.
+/// - If session exists but pane is dead: silently respawns pane with `cmd`.
+/// - If session exists and alive: no-op (caller will use switch-client to attach).
+///
+/// Uses the first pane ID from list-panes to avoid pane-base-index assumptions.
+pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> {
+    if session_exists(session) {
+        if is_session_pane_dead(session) {
+            // Get the first pane ID to avoid pane-base-index assumptions
+            let pane_id = Command::new("tmux")
+                .args(["list-panes", "-t", session, "-F", "#{pane_id}"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .and_then(|s| s.lines().next().map(|l| l.trim().to_string()))
+                .unwrap_or_else(|| format!("{}:0.0", session));
+
+            let status = Command::new("tmux")
+                .args(["respawn-pane", "-k", "-t", &pane_id, cmd])
+                .status()
+                .map_err(|e| {
+                    AgentreeError::TmuxError(format!("respawn-pane failed: {}", e))
+                })?;
+            if !status.success() {
+                return Err(AgentreeError::TmuxError(format!(
+                    "tmux respawn-pane failed for session '{}'",
+                    session
+                )));
+            }
+        }
+        // Session alive — caller uses switch-client to attach
+    } else {
+        create_session(session, cmd, cwd)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
