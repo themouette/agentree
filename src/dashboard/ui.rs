@@ -515,13 +515,14 @@ fn action_editor(state: &mut TuiState) {
     }
 }
 
-fn action_clear_attention(state: &TuiState, client: &DaemonClient) {
-    if let Some(ws) = state.selected_workspace() {
-        // Silent no-op if workspace has no attention flag
+fn action_clear_attention(state: &mut TuiState, client: &DaemonClient) {
+    if let Some(ws) = state.workspaces.get_mut(state.selected) {
         if ws.attention.is_some() {
-            let _ = client.clear_attention(&ws.branch);
-            // Daemon deletes .agentree/attention.md and updates in-memory state.
-            // TUI picks up the cleared flag within the next 1s poll cycle — no extra work needed.
+            // Optimistic clear: update local TUI state immediately.
+            // Next 1s poll will confirm; flag reappears only if daemon delete failed.
+            let branch = ws.branch.clone();
+            ws.attention = None;
+            let _ = client.clear_attention(&branch);
         }
     }
 }
