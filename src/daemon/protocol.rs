@@ -2,11 +2,11 @@ use serde::{Deserialize, Serialize};
 
 /// Status written by an agent into `{worktree}/.agentree/status.json`
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
+#[serde(default)]
 pub struct AgentStatus {
-    pub phase: String,
+    pub phase: Option<String>,
     pub current_task: Option<String>,
-    /// RFC3339 timestamp of last agent activity
-    pub last_activity: Option<String>,
+    // last_activity intentionally absent — daemon derives from git log timestamp
 }
 
 /// Request sent from dashboard client to daemon over Unix socket (newline-delimited JSON)
