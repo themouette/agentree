@@ -193,12 +193,12 @@ fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
             let candidate = gitdir.join(rel);
             candidate
                 .canonicalize()
-                .map_err(|e| AgentreeError::Io(e))?
+                .map_err(AgentreeError::Io)?
         } else {
             // No commondir means gitdir IS the common dir (main repo case)
             gitdir
                 .canonicalize()
-                .map_err(|e| AgentreeError::Io(e))?
+                .map_err(AgentreeError::Io)?
         }
     };
 

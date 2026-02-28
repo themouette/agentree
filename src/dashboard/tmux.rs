@@ -16,6 +16,19 @@ pub fn session_exists(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Kill a tmux session by name. Returns Ok(()) whether or not the session existed.
+///
+/// `tmux kill-session` exits 1 when the session does not exist — that is treated
+/// as success here because the caller's goal (no running session) is already met.
+pub fn kill_session(session: &str) -> Result<()> {
+    let _status = Command::new("tmux")
+        .args(["kill-session", "-t", session])
+        .status()
+        .map_err(AgentreeError::Io)?;
+    // Intentionally ignore exit code — non-zero means session didn't exist, which is fine.
+    Ok(())
+}
+
 /// Create a new detached tmux session running `cmd` in `cwd`
 pub fn create_session(name: &str, cmd: &str, cwd: &Path) -> Result<()> {
     let cwd_str = cwd.to_string_lossy();
@@ -148,23 +161,26 @@ pub fn bind_key_return_to_dashboard(session: &str) {
         .output();
 }
 
+/// Sanitize a branch name for use as a tmux session name component.
+///
+/// Replaces '/' and ':' with '-'. Colons cause tmux session:window target ambiguity.
+fn sanitize_branch(branch: &str) -> String {
+    branch.replace(['/', ':'], "-")
+}
+
 /// Canonical tmux session name for an agent workspace
 pub fn agent_session_name(branch: &str) -> String {
-    // Replace '/' and ':' with '-' — colons cause tmux session:window target ambiguity
-    let safe = branch.replace('/', "-").replace(':', "-");
-    format!("agentree-{}", safe)
+    format!("agentree-{}", sanitize_branch(branch))
 }
 
 /// Canonical tmux session name for a persistent terminal session in a workspace.
 pub fn terminal_session_name(branch: &str) -> String {
-    let safe = branch.replace('/', "-").replace(':', "-");
-    format!("agentree-{}-term", safe)
+    format!("agentree-{}-term", sanitize_branch(branch))
 }
 
 /// Canonical tmux session name for a persistent editor session in a workspace.
 pub fn editor_session_name(branch: &str) -> String {
-    let safe = branch.replace('/', "-").replace(':', "-");
-    format!("agentree-{}-edit", safe)
+    format!("agentree-{}-edit", sanitize_branch(branch))
 }
 
 /// List pane IDs in visual (index) order for the first window of a session.
@@ -562,7 +578,7 @@ pub fn focus_right_pane(session: &str) {
 /// Matches panes whose title starts with `agentree-{safe_branch}`.
 /// Called when a workspace is removed to clean up background panes.
 pub fn kill_workspace_panes(session: &str, branch: &str) {
-    let safe = branch.replace('/', "-").replace(':', "-");
+    let safe = sanitize_branch(branch);
     let prefix = format!("agentree-{}", safe);
 
     let pane_infos: Vec<(String, String)> = Command::new("tmux")

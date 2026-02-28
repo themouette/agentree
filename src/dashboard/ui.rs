@@ -310,7 +310,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
             .workspaces
             .iter()
             .enumerate()
-            .map(|(i, ws)| {
+            .map(|(_, ws)| {
                 let agent_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::agent_session_name(&ws.branch));
                 let term_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::terminal_session_name(&ws.branch));
                 let edit_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::editor_session_name(&ws.branch));
@@ -343,6 +343,21 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                 // Branch name (middle-truncated)
                 let branch = truncate_middle(&ws.branch, branch_width);
 
+                // Phase tag: shown after branch if agent_status.phase is present
+                let phase_tag = ws.agent_status
+                    .as_ref()
+                    .and_then(|s| s.phase.as_ref())
+                    .map(|p| {
+                        // Truncate phase string to 12 chars
+                        let truncated = if p.chars().count() > 12 {
+                            format!("{}…", p.chars().take(11).collect::<String>())
+                        } else {
+                            p.clone()
+                        };
+                        format!(" [{}]", truncated)
+                    })
+                    .unwrap_or_default();
+
                 // Conditional git stats
                 let ahead_str = if ws.commits_ahead > 0 {
                     format!("\u{2191}{}", ws.commits_ahead)
@@ -364,18 +379,15 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                     Span::styled(">_ ", term_style),
                     Span::styled("E ", edit_style),
                     Span::styled(attention_str, attention_style),
-                    Span::raw(format!("{:<width$} ", branch, width = branch_width)),
+                    Span::raw(format!("{:<width$}", branch, width = branch_width)),
+                    Span::styled(phase_tag, Style::default().fg(Color::DarkGray)), // phase after branch
+                    Span::raw(" "),
                     Span::styled(stats_str, Style::default().fg(Color::DarkGray)),
                     Span::raw(" "),
                     Span::styled(format!("{:>7}", age), Style::default().fg(Color::DarkGray)),
                 ];
 
-                // Attention rows (not selected) get yellow background
-                let item_style = if ws.attention.is_some() && i != state.selected {
-                    Style::default().bg(Color::Yellow).fg(Color::Black)
-                } else {
-                    Style::default()
-                };
+                let item_style = Style::default(); // No row background — selection highlight always wins cleanly
 
                 let mut lines: Vec<Line> = vec![Line::from(spans)];
 

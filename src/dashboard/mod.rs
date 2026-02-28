@@ -102,6 +102,51 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     tmux_util::attach(DASHBOARD_SESSION)
 }
 
+/// Kill the dashboard tmux session and stop the daemon.
+/// Safe to call even if the session or daemon is not running.
+pub fn kill_dashboard() -> Result<()> {
+    // 1. Kill the tmux session (noop if not running)
+    let session_was_running = tmux_util::session_exists(DASHBOARD_SESSION);
+    tmux_util::kill_session(DASHBOARD_SESSION)?;
+    if session_was_running {
+        eprintln!("Dashboard session '{}' killed.", DASHBOARD_SESSION);
+    } else {
+        eprintln!("No dashboard session running.");
+    }
+
+    // 2. Stop the daemon via SIGTERM to the PID recorded in the PID file
+    let sock_path = daemon::socket_path()
+        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
+
+    let pid_path = daemon::runtime_dir().map(|d| d.join("daemon.pid"));
+
+    if let Some(pid_path) = pid_path {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                // Send SIGTERM to daemon process
+                #[cfg(unix)]
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status();
+                // Give daemon time to clean up socket and PID file
+                std::thread::sleep(Duration::from_millis(500));
+                // Report whether daemon stopped
+                if !try_connect(&sock_path) {
+                    eprintln!("Daemon stopped.");
+                } else {
+                    eprintln!("Warning: daemon may still be running. Check: agentree daemon --status");
+                }
+            } else {
+                eprintln!("No daemon PID found — daemon may not be running.");
+            }
+        } else {
+            eprintln!("No daemon PID file found — daemon may not be running.");
+        }
+    }
+
+    Ok(())
+}
+
 /// Ensure the daemon is running, starting it if necessary.
 ///
 /// Progress display is TTY-aware:
