@@ -51,7 +51,7 @@
 
 - [x] **STAT-01**: `.agentree/status.json` format is documented (phase, current_task, last_activity)
 - [x] **STAT-02**: CLAUDE.md worktree template instructs agents to write status files
-- [ ] **STAT-03**: Daemon reads and displays agent status in TUI workspace list
+- [x] **STAT-03**: Daemon reads and displays agent status in TUI workspace list
 
 ### Tests
 

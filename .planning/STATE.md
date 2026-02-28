@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Phase 4 of 5: Status Protocol**
 
-Status: In Progress — Plan 01 complete (1/3 plans done)
+Status: In Progress — Plan 02 complete (2/3 plans done)
 
 Progress: [████████░░░░░░░░░░░░] 3/5 phases (in progress)
 
@@ -67,6 +67,9 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 - Phase 04 Plan 01: setup_agentree_workspace() is non-fatal — warns if .agentree/ setup fails
 - Phase 04 Plan 01: add_agentree_to_git_exclude() writes to $GIT_COMMON_DIR/info/exclude via commondir
 - Phase 04 Plan 01: Backend trait status_dir() has default impl; daemon wiring deferred (architectural)
+- Phase 04 Plan 02: Attention takes priority over current_task — else-if chain for mutual exclusivity
+- Phase 04 Plan 02: action_clear_attention takes &mut TuiState — optimistic clear before daemon call
+- Phase 04 Plan 02: ws.branch cloned before ws.attention = None to avoid Rust borrow conflicts
 
 ## Performance Metrics
 
@@ -81,12 +84,13 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 | 03    | 02   | 3min     | 2     | 1     |
 | 03    | 03   | 30min    | 2     | 1     |
 | 04    | 01   | 3min     | 3     | 4     |
+| 04    | 02   | 2min     | 2     | 1     |
 
 ## Last Session
 
-Stopped at: Completed 04-01-PLAN.md — AgentStatus fixed, CLAUDE.md template, worktree setup, status_dir() on Backend trait.
+Stopped at: Completed 04-02-PLAN.md — TUI two-line rows, yellow attention, optimistic clear.
 Timestamp: 2026-02-28
-Resume file: .planning/phases/04-status-protocol/04-02-PLAN.md
+Resume file: .planning/phases/04-status-protocol/04-03-PLAN.md
 
 ## Open Questions
 
