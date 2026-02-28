@@ -155,6 +155,13 @@ Plans:
 
 **Covers:** STAT-01, STAT-02, STAT-03
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Protocol + worktree setup: fix AgentStatus struct, create templates/CLAUDE.md, wire .agentree/ dir + git exclude in create_worktree()
+- [ ] 04-02-PLAN.md — TUI status display: two-line workspace rows, yellow attention highlight, optimistic c-key clear
+- [ ] 04-03-PLAN.md — Human verification: status protocol end-to-end smoke test
+
 ### Changes
 
 1. **Document `.agentree/status.json` format:**
