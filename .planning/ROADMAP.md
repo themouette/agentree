@@ -157,10 +157,12 @@ Plans:
 
 **Plans:** 3 plans
 
+**Plans: 3/3 complete**
+
 Plans:
-- [ ] 04-01-PLAN.md — Protocol + worktree setup: fix AgentStatus struct, create templates/CLAUDE.md, wire .agentree/ dir + git exclude in create_worktree()
-- [ ] 04-02-PLAN.md — TUI status display: two-line workspace rows, yellow attention highlight, optimistic c-key clear
-- [ ] 04-03-PLAN.md — Human verification: status protocol end-to-end smoke test
+- [x] 04-01-PLAN.md — Protocol + worktree setup: fix AgentStatus struct, create templates/CLAUDE.md, wire .agentree/ dir + git exclude in create_worktree()
+- [x] 04-02-PLAN.md — TUI status display: two-line workspace rows, yellow attention highlight, optimistic c-key clear
+- [x] 04-03-PLAN.md — Human verification: status protocol end-to-end smoke test
 
 ### Changes
 

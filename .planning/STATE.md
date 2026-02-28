@@ -24,7 +24,7 @@ See: .planning/PROJECT.md (updated 2026-02-27)
 
 **Phase 4 of 5: Status Protocol**
 
-Status: In Progress — Plan 02 complete (2/3 plans done)
+Status: Complete — Plan 03 complete (3/3 plans done)
 
 Progress: [████████░░░░░░░░░░░░] 3/5 phases (in progress)
 
@@ -70,6 +70,9 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 - Phase 04 Plan 02: Attention takes priority over current_task — else-if chain for mutual exclusivity
 - Phase 04 Plan 02: action_clear_attention takes &mut TuiState — optimistic clear before daemon call
 - Phase 04 Plan 02: ws.branch cloned before ws.attention = None to avoid Rust borrow conflicts
+- Phase 04 Plan 03: All 4 smoke tests passed — status protocol verified end-to-end
+- Phase 04 Plan 03: CLAUDE.md at worktree root is not git-excluded — minor UX gap, deferred to Phase 5
+- Phase 04 Plan 03: Follow-up: exclude CLAUDE.md in git exclude, or skip when .claude/CLAUDE.md already exists
 
 ## Performance Metrics
 
@@ -85,12 +88,13 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 | 03    | 03   | 30min    | 2     | 1     |
 | 04    | 01   | 3min     | 3     | 4     |
 | 04    | 02   | 2min     | 2     | 1     |
+| 04    | 03   | ~5min    | 2     | 0     |
 
 ## Last Session
 
-Stopped at: Completed 04-02-PLAN.md — TUI two-line rows, yellow attention, optimistic clear.
-Timestamp: 2026-02-28
-Resume file: .planning/phases/04-status-protocol/04-03-PLAN.md
+Stopped at: Completed 04-03-PLAN.md — Status protocol human verification complete. Phase 4 done.
+Timestamp: 2026-03-01
+Resume file: .planning/phases/05-tests-and-hardening/ (next phase)
 
 ## Open Questions
 
@@ -113,4 +117,7 @@ Resume file: .planning/phases/04-status-protocol/04-03-PLAN.md
   stale PID cleanup, SIGTERM/SIGINT/SIGHUP signal handlers, --status command, TTY spinner.
 - Phase 2 complete: dashboard opens, TUI workspace list works end-to-end. q detaches,
   Ctrl+C exits. Right pane recreation fixed (pane IDs, $TMUX_PANE split target).
+- Phase 4 complete: status protocol implemented and verified. agentree create wires .agentree/,
+  CLAUDE.md, and git exclude. TUI shows two-line rows for status + yellow attention. Optimistic
+  clear on c key. Minor UX gap: CLAUDE.md at worktree root is not git-excluded — deferred to Phase 5.
 - `.planning/codebase/` contains full codebase analysis from map-codebase run.
