@@ -445,22 +445,25 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
 // Key actions
 // ---------------------------------------------------------------------------
 
-fn action_agent(state: &TuiState) {
-    if let Some(ws) = state.selected_workspace() {
+fn action_agent(state: &mut TuiState) {
+    if let Some(ws) = state.selected_workspace().cloned() {
         let title = tmux::agent_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
-        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path);
+        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path) {
+            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        }
     }
 }
 
-fn action_terminal(state: &TuiState) {
-    if let Some(ws) = state.selected_workspace() {
+fn action_terminal(state: &mut TuiState) {
+    if let Some(ws) = state.selected_workspace().cloned() {
         let title = tmux::terminal_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
-        // split-window -c sets the working directory, so just exec the shell
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        let _ = tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path);
+        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path) {
+            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        }
     }
 }
 

@@ -417,6 +417,17 @@ fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
     Ok(())
 }
 
+/// Get the title of a specific pane by its pane ID.
+fn get_pane_title(pane_id: &str) -> String {
+    Command::new("tmux")
+        .args(["display-message", "-t", pane_id, "-p", "#{pane_title}"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
 /// Find a pane in the stash window by its title. Returns the pane ID (e.g. "%3") if found.
 fn find_stash_pane(session: &str, title: &str) -> Option<String> {
     let target = format!("{}:{}", session, STASH_WINDOW);
@@ -469,45 +480,51 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         .ok_or_else(|| AgentreeError::TmuxError("Dashboard main window has no panes".to_string()))?
         .clone();
 
-    // 3. If a right pane exists, move it to stash
+    // 3. If a right pane exists: park named panes in stash, kill unnamed ones.
+    // Unnamed (non-agentree) panes are plain shells — killing them prevents stash
+    // from accumulating panes that shrink each other to unusable widths.
     if main_panes.len() >= 2 {
         let right_id = &main_panes[1];
-        let out = Command::new("tmux")
-            .args([
-                "join-pane", "-d", "-h",
-                "-s", right_id,
-                "-t", &format!("{}:{}", session, STASH_WINDOW),
-            ])
-            .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("join-pane to stash failed: {}", e)))?;
-        if !out.status.success() {
-            return Err(AgentreeError::TmuxError(format!(
-                "tmux join-pane to stash failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
+        let right_title = get_pane_title(right_id);
+        if right_title.starts_with("agentree-") {
+            let out = Command::new("tmux")
+                .args([
+                    "join-pane", "-d", "-h",
+                    "-s", right_id,
+                    "-t", &format!("{}:{}", session, STASH_WINDOW),
+                ])
+                .output()
+                .map_err(|e| AgentreeError::TmuxError(format!("join-pane to stash failed: {}", e)))?;
+            if !out.status.success() {
+                return Err(AgentreeError::TmuxError(format!(
+                    "tmux join-pane to stash failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )));
+            }
+        } else {
+            let _ = Command::new("tmux")
+                .args(["kill-pane", "-t", right_id])
+                .output();
         }
     }
 
-    // 4. Find the requested pane in stash, or create it
+    // 4. Find the requested pane in stash, or create it.
+    // New panes are created via `new-window -d` (not `split-window -t stash`) to avoid
+    // size failures when stash panes have shrunk from repeated join-pane operations.
     let pane_to_show = if let Some(existing_id) = find_stash_pane(session, title) {
         existing_id
     } else {
-        // Stash window may have died if it was down to one pane and we just moved it.
-        // Recreate it before splitting.
-        ensure_stash_window(session)?;
-
         let cwd_str = cwd.to_string_lossy();
         let out = Command::new("tmux")
             .args([
-                "split-window", "-d", "-P", "-F", "#{pane_id}",
-                "-t", &format!("{}:{}", session, STASH_WINDOW),
-                "-c", &cwd_str, cmd,
+                "new-window", "-d", "-P", "-F", "#{pane_id}",
+                "-t", session, "-c", &cwd_str, cmd,
             ])
             .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("split-window in stash failed: {}", e)))?;
+            .map_err(|e| AgentreeError::TmuxError(format!("new-window for pane failed: {}", e)))?;
         if !out.status.success() {
             return Err(AgentreeError::TmuxError(format!(
-                "tmux split-window in stash failed: {}",
+                "tmux new-window for pane failed: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             )));
         }
