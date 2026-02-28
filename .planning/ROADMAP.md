@@ -244,5 +244,17 @@ The milestone is complete when:
 4. Writing `.agentree/status.json` in a worktree → updates in TUI within 2s
 5. All `cargo test` pass
 
+### Phase 6: Improve the UI
+
+**Goal:** Polish the TUI workspace list with a compact footer, clean attention visuals, agent phase display, scrollbar, and a kill-dashboard command.
+**Requirements**: UI-01 (compact footer), UI-02 (attention per-span color), UI-03 (phase display), UI-04 (scrollbar), UI-05 (kill-dashboard)
+**Depends on:** Phase 5
+**Plans:** 3 plans
+
+Plans:
+- [ ] 06-01-PLAN.md — TUI polish: compact footer, attention per-span color, phase tag on row, scrollbar
+- [ ] 06-02-PLAN.md — kill-dashboard: `agentree dashboard --kill` tears down session + stops daemon
+- [ ] 06-03-PLAN.md — Human verification: Phase 6 UI improvements smoke test
+
 ---
 *Roadmap created: 2026-02-27*
