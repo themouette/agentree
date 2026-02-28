@@ -36,6 +36,8 @@ struct TuiState {
     startup: TuiStartupState,
     /// Frame counter for spinner animation
     frame: u64,
+    /// Ephemeral error message shown in the status bar. Auto-clears after 3 seconds.
+    status_message: Option<(String, std::time::Instant)>,
 }
 
 impl TuiState {
@@ -47,6 +49,7 @@ impl TuiState {
             focused: true,
             startup: TuiStartupState::Connecting,
             frame: 0,
+            status_message: None,
         }
     }
 
@@ -415,35 +418,67 @@ fn action_agent(state: &TuiState) {
         let agent_session = tmux::agent_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
-        let _ = tmux::ensure_agent_session(&ws.branch, worktree_path, agent_cmd);
-        let attach_cmd = format!("tmux attach -t {}", shell_quote(&agent_session));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &attach_cmd);
-        let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
+        let _ = tmux::ensure_named_session(&agent_session, agent_cmd, worktree_path);
+        // Use switch-client (not attach -t) to avoid nested tmux client
+        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&agent_session));
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
+        // Do NOT call select_pane — the client has moved to the agent session
     }
 }
 
 fn action_terminal(state: &TuiState) {
     if let Some(ws) = state.selected_workspace() {
-        let cmd = format!("cd {} && exec $SHELL", shell_quote(&ws.path));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &cmd);
-        let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
+        let term_session = tmux::terminal_session_name(&ws.branch);
+        let worktree_path = std::path::Path::new(&ws.path);
+        // Resolve $SHELL in Rust so the embedded command doesn't depend on
+        // the tmux pane environment correctly inheriting $SHELL
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let shell_cmd = format!(
+            "cd {} && exec {}",
+            shell_quote(&ws.path),
+            shell_quote(&shell)
+        );
+        let _ = tmux::ensure_named_session(&term_session, &shell_cmd, worktree_path);
+        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&term_session));
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
+        // Do NOT call select_pane — the client has moved to the terminal session
     }
 }
 
-fn action_editor(state: &TuiState) {
-    if let Some(ws) = state.selected_workspace() {
+fn action_editor(state: &mut TuiState) {
+    if let Some(ws) = state.selected_workspace().cloned() {
+        // Resolve editor in Rust — not in the tmux pane environment
         let editor = std::env::var("EDITOR")
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| "vi".to_string());
-        let cmd = format!("{} {}", shell_quote(&editor), shell_quote(&ws.path));
-        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &cmd);
-        let _ = tmux::select_pane(DASHBOARD_SESSION, 1);
+
+        // Check that the resolved editor binary exists
+        if which::which(&editor).is_err() {
+            state.status_message = Some((
+                "No editor found — set $EDITOR".to_string(),
+                std::time::Instant::now(),
+            ));
+            return;
+        }
+
+        let edit_session = tmux::editor_session_name(&ws.branch);
+        let worktree_path = std::path::Path::new(&ws.path);
+        let edit_cmd = format!("{} {}", shell_quote(&editor), shell_quote(&ws.path));
+        let _ = tmux::ensure_named_session(&edit_session, &edit_cmd, worktree_path);
+        let switch_cmd = format!("tmux switch-client -t {}", shell_quote(&edit_session));
+        let _ = tmux::run_in_right_pane(DASHBOARD_SESSION, &switch_cmd);
+        // Do NOT call select_pane — the client has moved to the editor session
     }
 }
 
 fn action_clear_attention(state: &TuiState, client: &DaemonClient) {
     if let Some(ws) = state.selected_workspace() {
-        let _ = client.clear_attention(&ws.branch);
+        // Silent no-op if workspace has no attention flag
+        if ws.attention.is_some() {
+            let _ = client.clear_attention(&ws.branch);
+            // Daemon deletes .agentree/attention.md and updates in-memory state.
+            // TUI picks up the cleared flag within the next 1s poll cycle — no extra work needed.
+        }
     }
 }
 
