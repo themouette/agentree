@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-02-28T23:11:36.280Z"
+last_updated: "2026-02-28T23:57:47.445Z"
 progress:
-  total_phases: 4
+  total_phases: 5
   completed_phases: 4
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 14
+  completed_plans: 12
 ---
 
 # Project State
@@ -73,6 +73,9 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 - Phase 04 Plan 03: All 4 smoke tests passed — status protocol verified end-to-end
 - Phase 04 Plan 03: CLAUDE.md at worktree root is not git-excluded — minor UX gap, deferred to Phase 5
 - Phase 04 Plan 03: Follow-up: exclude CLAUDE.md in git exclude, or skip when .claude/CLAUDE.md already exists
+- [Phase 06]: kill_session ignores tmux exit code — non-zero means session not found, goal already met
+- [Phase 06]: Daemon stopped via SIGTERM to PID file rather than socket protocol — simpler and works when socket unavailable
+- [Phase 06]: sanitize_branch() extracted as private helper to fix consecutive str::replace clippy lint
 
 ## Performance Metrics
 
@@ -89,12 +92,13 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 | 04    | 01   | 3min     | 3     | 4     |
 | 04    | 02   | 2min     | 2     | 1     |
 | 04    | 03   | ~5min    | 2     | 0     |
+| 06    | 02   | 3min     | 2     | 5     |
 
 ## Last Session
 
-Stopped at: Completed 04-03-PLAN.md — Status protocol human verification complete. Phase 4 done.
+Stopped at: Completed 06-02-PLAN.md — dashboard --kill command with kill_session and kill_dashboard implemented.
 Timestamp: 2026-03-01
-Resume file: .planning/phases/05-tests-and-hardening/ (next phase)
+Resume file: .planning/phases/06-improve-the-ui/ (plan 03 next)
 
 ## Open Questions
 
@@ -107,9 +111,15 @@ Resume file: .planning/phases/05-tests-and-hardening/ (next phase)
 - Q: Nested tmux detection — if user is already inside tmux, warn or proceed?
   Current decision: Implemented in Phase 2 — warn with "Nest? [y/N]" prompt.
 
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 6 added: Improve the UI
+
 ## Pending Todos
 
-- Add kill-dashboard command — `agentree dashboard --kill` to fully teardown session + daemon
+- (none — kill-dashboard command completed in 06-02)
 
 ## Notes
 
