@@ -12,7 +12,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
     Terminal,
 };
@@ -371,14 +371,38 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                     Span::styled(format!("{:>7}", age), Style::default().fg(Color::DarkGray)),
                 ];
 
-                // Attention rows (not selected) get red background
+                // Attention rows (not selected) get yellow background
                 let item_style = if ws.attention.is_some() && i != state.selected {
-                    Style::default().bg(Color::Red)
+                    Style::default().bg(Color::Yellow).fg(Color::Black)
                 } else {
                     Style::default()
                 };
 
-                ListItem::new(Line::from(spans)).style(item_style)
+                let mut lines: Vec<Line> = vec![Line::from(spans)];
+
+                // Second line: attention first-line takes priority over current_task
+                if let Some(ref attention_content) = ws.attention {
+                    let first_line = attention_content.lines().next().unwrap_or("").to_string();
+                    if !first_line.trim().is_empty() {
+                        let truncated = truncate_right(&first_line, list_width.saturating_sub(4));
+                        lines.push(Line::from(vec![
+                            Span::raw("    "),
+                            Span::styled(truncated, Style::default().fg(Color::Yellow)),
+                        ]));
+                    }
+                } else if let Some(ref status) = ws.agent_status {
+                    if let Some(ref task) = status.current_task {
+                        if !task.trim().is_empty() {
+                            let truncated = truncate_right(task, list_width.saturating_sub(4));
+                            lines.push(Line::from(vec![
+                                Span::raw("    "),
+                                Span::styled(truncated, Style::default().fg(Color::DarkGray)),
+                            ]));
+                        }
+                    }
+                }
+
+                ListItem::new(Text::from(lines)).style(item_style)
             })
             .collect();
 
@@ -548,4 +572,14 @@ fn truncate_middle(s: &str, max: usize) -> String {
 /// Safe for embedding in POSIX shell command strings.
 fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r#"'"'"'"#))
+}
+
+/// Right-trim a string to at most `max` chars, appending "…" if truncated.
+fn truncate_right(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
+    }
+    let trimmed: String = chars[..max.saturating_sub(1)].iter().collect();
+    format!("{}\u{2026}", trimmed)
 }
