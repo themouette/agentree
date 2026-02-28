@@ -82,9 +82,6 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     // user switches panes. tmux disables this by default.
     tmux_util::enable_focus_events();
 
-    // Create stash window for background action panes (agent, terminal, editor)
-    tmux_util::ensure_stash_window(DASHBOARD_SESSION)?;
-
     // Split into two horizontal panes
     tmux_util::split_horizontal(DASHBOARD_SESSION)?;
 

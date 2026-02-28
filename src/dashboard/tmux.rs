@@ -428,11 +428,10 @@ fn get_pane_title(pane_id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Find a pane in the stash window by its title. Returns the pane ID (e.g. "%3") if found.
-fn find_stash_pane(session: &str, title: &str) -> Option<String> {
-    let target = format!("{}:{}", session, STASH_WINDOW);
+/// Find a pane anywhere in the session by its title. Returns the pane ID if found.
+fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
     let out = Command::new("tmux")
-        .args(["list-panes", "-t", &target, "-F", "#{pane_id} #{pane_title}"])
+        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_id} #{pane_title}"])
         .output()
         .ok()?;
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -462,42 +461,36 @@ pub fn pane_exists_in_session(session: &str, title: &str) -> bool {
 
 /// Show a named action pane in the right slot of the dashboard's main window.
 ///
-/// Implements stash-based pane management:
-/// - Main window has two panes: left (TUI) and right (active action pane).
-/// - Stash window holds inactive panes, identified by title.
-/// - The current right pane (if any) is moved to stash, then the requested pane
-///   is moved from stash to main — or created fresh if it doesn't exist yet.
+/// Each background pane lives in its own detached window (via break-pane).
+/// No shared stash window — avoids all size constraint failures.
+///
+/// - Named right pane (agentree-*): parked via break-pane into its own window.
+/// - Unnamed right pane (plain shell): killed — no need to preserve it.
+/// - Requested pane found anywhere in session: join-pane'd into main.
+/// - Requested pane not found: created via new-window -d, then join-pane'd.
 ///
 /// After this call, the right pane shows the requested content with keyboard focus.
 pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()> {
-    // 1. Ensure stash window exists
-    ensure_stash_window(session)?;
-
-    // 2. Snapshot main window pane layout
+    // 1. Snapshot main window pane layout
     let main_panes = list_pane_ids(session);
     let left_id = main_panes
         .first()
         .ok_or_else(|| AgentreeError::TmuxError("Dashboard main window has no panes".to_string()))?
         .clone();
 
-    // 3. If a right pane exists: park named panes in stash, kill unnamed ones.
-    // Unnamed (non-agentree) panes are plain shells — killing them prevents stash
-    // from accumulating panes that shrink each other to unusable widths.
+    // 2. If a right pane exists: park named panes via break-pane, kill unnamed ones.
     if main_panes.len() >= 2 {
         let right_id = &main_panes[1];
         let right_title = get_pane_title(right_id);
         if right_title.starts_with("agentree-") {
+            // break-pane creates a new detached window for this pane — no size constraints.
             let out = Command::new("tmux")
-                .args([
-                    "join-pane", "-d", "-h",
-                    "-s", right_id,
-                    "-t", &format!("{}:{}", session, STASH_WINDOW),
-                ])
+                .args(["break-pane", "-d", "-s", right_id])
                 .output()
-                .map_err(|e| AgentreeError::TmuxError(format!("join-pane to stash failed: {}", e)))?;
+                .map_err(|e| AgentreeError::TmuxError(format!("break-pane failed: {}", e)))?;
             if !out.status.success() {
                 return Err(AgentreeError::TmuxError(format!(
-                    "tmux join-pane to stash failed: {}",
+                    "tmux break-pane failed: {}",
                     String::from_utf8_lossy(&out.stderr).trim()
                 )));
             }
@@ -508,10 +501,8 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         }
     }
 
-    // 4. Find the requested pane in stash, or create it.
-    // New panes are created via `new-window -d` (not `split-window -t stash`) to avoid
-    // size failures when stash panes have shrunk from repeated join-pane operations.
-    let pane_to_show = if let Some(existing_id) = find_stash_pane(session, title) {
+    // 3. Find the requested pane anywhere in the session, or create it.
+    let pane_to_show = if let Some(existing_id) = find_pane_in_session(session, title) {
         existing_id
     } else {
         let cwd_str = cwd.to_string_lossy();
