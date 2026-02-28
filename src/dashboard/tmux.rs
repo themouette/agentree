@@ -150,9 +150,21 @@ pub fn bind_key_return_to_dashboard(session: &str) {
 
 /// Canonical tmux session name for an agent workspace
 pub fn agent_session_name(branch: &str) -> String {
-    // Replace '/' with '-' to get a valid tmux session name
-    let safe = branch.replace('/', "-");
-    format!("agentree:{}", safe)
+    // Replace '/' and ':' with '-' — colons cause tmux session:window target ambiguity
+    let safe = branch.replace('/', "-").replace(':', "-");
+    format!("agentree-{}", safe)
+}
+
+/// Canonical tmux session name for a persistent terminal session in a workspace.
+pub fn terminal_session_name(branch: &str) -> String {
+    let safe = branch.replace('/', "-").replace(':', "-");
+    format!("agentree-{}-term", safe)
+}
+
+/// Canonical tmux session name for a persistent editor session in a workspace.
+pub fn editor_session_name(branch: &str) -> String {
+    let safe = branch.replace('/', "-").replace(':', "-");
+    format!("agentree-{}-edit", safe)
 }
 
 /// List pane IDs in visual (index) order for the first window of a session.
@@ -303,4 +315,34 @@ pub fn ensure_agent_session(branch: &str, worktree_path: &Path, agent_cmd: &str)
         create_session(&session, agent_cmd, worktree_path)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_agent_session_name_sanitizes_slash() {
+        assert_eq!(agent_session_name("feature/my-auth"), "agentree-feature-my-auth");
+    }
+
+    #[test]
+    fn test_agent_session_name_sanitizes_colon() {
+        assert_eq!(agent_session_name("hotfix:v1.2"), "agentree-hotfix-v1.2");
+    }
+
+    #[test]
+    fn test_agent_session_name_simple_branch() {
+        assert_eq!(agent_session_name("main"), "agentree-main");
+    }
+
+    #[test]
+    fn test_terminal_session_name() {
+        assert_eq!(terminal_session_name("feature/auth"), "agentree-feature-auth-term");
+    }
+
+    #[test]
+    fn test_editor_session_name() {
+        assert_eq!(editor_session_name("feature/auth"), "agentree-feature-auth-edit");
+    }
 }
