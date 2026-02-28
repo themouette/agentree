@@ -249,7 +249,7 @@ The milestone is complete when:
 **Goal:** Polish the TUI workspace list with a compact footer, clean attention visuals, agent phase display, scrollbar, and a kill-dashboard command.
 **Requirements**: UI-01 (compact footer), UI-02 (attention per-span color), UI-03 (phase display), UI-04 (scrollbar), UI-05 (kill-dashboard)
 **Depends on:** Phase 5
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 06-01-PLAN.md — TUI polish: compact footer, attention per-span color, phase tag on row, scrollbar

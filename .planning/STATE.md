@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-02-28T23:57:47.445Z"
+last_updated: "2026-02-28T23:59:32.039Z"
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 14
-  completed_plans: 12
+  completed_plans: 13
 ---
 
 # Project State
@@ -76,6 +76,9 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 - [Phase 06]: kill_session ignores tmux exit code — non-zero means session not found, goal already met
 - [Phase 06]: Daemon stopped via SIGTERM to PID file rather than socket protocol — simpler and works when socket unavailable
 - [Phase 06]: sanitize_branch() extracted as private helper to fix consecutive str::replace clippy lint
+- [Phase 06-01]: Footer uses no block/border — single Paragraph at Constraint::Length(1), freeing 2 rows for the workspace list
+- [Phase 06-01]: item_style = Style::default() always — yellow row background conflicted with blue selection highlight; attention conveyed per-span only
+- [Phase 06-01]: phase_tag truncated to 12 chars; visible_items = floor((inner_height - 2) / 2) for scrollbar threshold; Scrollbar rendered only when list overflows
 
 ## Performance Metrics
 
@@ -93,6 +96,7 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 | 04    | 02   | 2min     | 2     | 1     |
 | 04    | 03   | ~5min    | 2     | 0     |
 | 06    | 02   | 3min     | 2     | 5     |
+| Phase 06-improve-the-ui P01 | 5min | 3 tasks | 1 files |
 
 ## Last Session
 
