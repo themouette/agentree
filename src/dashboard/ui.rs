@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
     Terminal,
 };
 use std::io;
@@ -309,8 +309,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         let items: Vec<ListItem> = state
             .workspaces
             .iter()
-            .enumerate()
-            .map(|(_, ws)| {
+            .map(|ws| {
                 let agent_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::agent_session_name(&ws.branch));
                 let term_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::terminal_session_name(&ws.branch));
                 let edit_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::editor_session_name(&ws.branch));
@@ -440,6 +439,24 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         list_state.select(Some(state.selected));
 
         f.render_stateful_widget(list, inner[1], &mut list_state);
+
+        // Scrollbar: only when list has more items than visible area
+        // Each workspace is 2 rows tall (two-line rows).
+        // Visible item count = floor(inner[1].height / 2), accounting for 2-row borders.
+        let inner_height = inner[1].height.saturating_sub(2); // subtract top+bottom borders
+        let rows_per_item: u16 = 2;
+        let visible_items = (inner_height / rows_per_item) as usize;
+        if state.workspaces.len() > visible_items {
+            let mut scrollbar_state = ScrollbarState::new(state.workspaces.len())
+                .position(state.selected);
+            f.render_stateful_widget(
+                Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None),
+                inner[1],
+                &mut scrollbar_state,
+            );
+        }
     }
 
     // ── footer: status message (left) + key hints (right, abbreviated) ──
