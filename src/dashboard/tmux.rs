@@ -491,6 +491,8 @@ pub fn show_welcome_panel(session: &str) {
 
     let _ = show_pane(session, WELCOME_PANE_TITLE, &cmd, &cwd);
     set_right_pane_display_title(session, "Help");
+    // Keep focus on the left TUI pane — the welcome panel is read-only
+    focus_left_pane(session);
 }
 
 /// Resize the calling pane to a percentage of the terminal width.
@@ -734,6 +736,104 @@ pub fn focus_right_pane(session: &str) {
     if let Some(right_id) = pane_ids.get(1) {
         let _ = Command::new("tmux")
             .args(["select-pane", "-t", right_id])
+            .output();
+    }
+}
+
+/// Give keyboard focus to the left (TUI) pane of the main window.
+pub fn focus_left_pane(session: &str) {
+    let pane_ids = list_pane_ids(session);
+    if let Some(left_id) = pane_ids.first() {
+        let _ = Command::new("tmux")
+            .args(["select-pane", "-t", left_id])
+            .output();
+    }
+}
+
+/// Send SIGTERM to all non-TUI pane processes in the session.
+///
+/// Lists every pane in the session, excludes the calling pane (the TUI itself,
+/// identified via `$TMUX_PANE`), and signals each pane's process tree.
+///
+/// For each pane we signal three ways to handle all process group topologies:
+///   1. Direct SIGTERM to the pane PID (agentree itself)
+///   2. Process-group SIGTERM via negative PID (catches same-group children)
+///   3. SIGTERM to direct children found via `pgrep -P` (catches children that
+///      called setsid/setpgid — e.g. claude-vm managing a VM daemon)
+///
+/// Returns the pane PIDs so the caller can monitor them for liveness.
+pub fn signal_workspace_panes(session: &str) -> Vec<u32> {
+    let own_pane_id = std::env::var("TMUX_PANE").unwrap_or_default();
+
+    let pids: Vec<u32> = Command::new("tmux")
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            session,
+            "-F",
+            "#{pane_id} #{pane_pid}",
+        ])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| {
+            s.lines()
+                .filter_map(|line| {
+                    let mut parts = line.splitn(2, ' ');
+                    let pane_id = parts.next()?.trim().to_string();
+                    let pid_str = parts.next()?.trim().to_string();
+                    if pane_id == own_pane_id {
+                        return None; // skip the TUI pane
+                    }
+                    pid_str.parse::<u32>().ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    for &pid in &pids {
+        #[cfg(unix)]
+        signal_pid_tree(pid);
+    }
+
+    pids
+}
+
+/// Send SIGTERM to a process and its direct children.
+///
+/// Three-pronged approach:
+///   1. Direct signal to the process itself
+///   2. Process-group signal (negative PID) — reaches children in the same group
+///   3. `pgrep -P` children — reaches children that changed their process group
+#[cfg(unix)]
+fn signal_pid_tree(pid: u32) {
+    // 1. Direct signal
+    let _ = Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .output();
+
+    // 2. Process group (catches children that inherited the group)
+    let _ = Command::new("kill")
+        .args(["-TERM", &format!("-{}", pid)])
+        .output();
+
+    // 3. Direct children via pgrep (catches children that called setsid/setpgid)
+    let children = Command::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| {
+            s.lines()
+                .filter_map(|l| l.trim().parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    for child_pid in children {
+        let _ = Command::new("kill")
+            .args(["-TERM", &child_pid.to_string()])
             .output();
     }
 }

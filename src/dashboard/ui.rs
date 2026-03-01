@@ -54,6 +54,10 @@ struct TuiState {
     started_daemon: bool,
     /// True when the footer shows "Kill dashboard? [y/N]" confirmation.
     quit_pending: bool,
+    /// Set to Some(start_time) when the goodbye screen is active (shutdown in progress).
+    shutting_down: Option<Instant>,
+    /// PIDs of workspace pane processes signaled on quit; monitored until all exit.
+    shutdown_pids: Vec<u32>,
     /// Branch of the last-actioned workspace (used by indicator pane).
     active_workspace: Option<String>,
     /// Pane open/running status per workspace branch. Refreshed on each poll cycle.
@@ -72,6 +76,8 @@ impl TuiState {
             status_message: None,
             started_daemon: false,
             quit_pending: false,
+            shutting_down: None,
+            shutdown_pids: vec![],
             active_workspace: None,
             pane_status: HashMap::new(),
         }
@@ -134,6 +140,16 @@ fn run_event_loop(
     loop {
         state.frame = state.frame.wrapping_add(1);
 
+        // Complete shutdown when all signaled processes have exited, or after 10s max
+        if let Some(shutdown_start) = state.shutting_down {
+            let all_done = state.shutdown_pids.is_empty()
+                || state.shutdown_pids.iter().all(|&pid| !pid_is_alive(pid));
+            if all_done || shutdown_start.elapsed() >= Duration::from_secs(10) {
+                let _ = tmux::kill_session(DASHBOARD_SESSION);
+                break;
+            }
+        }
+
         // Clear expired status message at start of each frame
         if let Some((_, shown_at)) = &state.status_message {
             if shown_at.elapsed() >= std::time::Duration::from_secs(3) {
@@ -145,8 +161,10 @@ fn run_event_loop(
             .draw(|f| render(f, state))
             .map_err(crate::error::AgentreeError::Io)?;
 
-        // When Connecting, poll frequently to transition fast
-        let poll_timeout = if state.startup == TuiStartupState::Connecting {
+        // When Connecting or shutting down, poll frequently to transition fast
+        let poll_timeout = if state.startup == TuiStartupState::Connecting
+            || state.shutting_down.is_some()
+        {
             Duration::from_millis(100)
         } else {
             REFRESH_INTERVAL
@@ -154,7 +172,7 @@ fn run_event_loop(
 
         if event::poll(poll_timeout).map_err(crate::error::AgentreeError::Io)? {
             match event::read().map_err(crate::error::AgentreeError::Io)? {
-                Event::Key(key) => {
+                Event::Key(key) if state.shutting_down.is_none() => {
                     match (key.modifiers, key.code) {
                         // Quit: first press shows confirmation footer, second q cancels
                         (_, KeyCode::Char('q')) => {
@@ -167,8 +185,8 @@ fn run_event_loop(
                         }
                         // Confirm quit
                         (_, KeyCode::Char('y')) | (_, KeyCode::Char('Y')) if state.quit_pending => {
-                            execute_quit(state);
-                            break;
+                            begin_quit(state);
+                            // Do NOT break — let the event loop drive the rest
                         }
                         // Cancel quit
                         (_, KeyCode::Char('n')) | (_, KeyCode::Char('N')) | (_, KeyCode::Esc)
@@ -297,11 +315,46 @@ fn run_event_loop(
 }
 
 fn render(f: &mut ratatui::Frame, state: &TuiState) {
+    if state.shutting_down.is_some() {
+        render_goodbye(f, f.area());
+        return;
+    }
     match state.startup {
         TuiStartupState::Connecting => render_connecting(f, f.area(), state.frame),
         TuiStartupState::ConnectionLost => render_connection_lost(f, f.area()),
         TuiStartupState::Connected => render_workspace_list(f, f.area(), state),
     }
+}
+
+fn render_goodbye(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
+    f.render_widget(
+        Block::default().style(Style::default().bg(Color::Black)),
+        area,
+    );
+    let vchunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(3),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+
+    let text = Paragraph::new(vec![
+        Line::from(Span::styled(
+            "Shutting down agentree...",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(Span::styled(
+            "Waiting for processes to stop.",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ])
+    .alignment(Alignment::Center);
+
+    f.render_widget(text, vchunks[1]);
 }
 
 fn render_connecting(f: &mut ratatui::Frame, area: ratatui::layout::Rect, frame: u64) {
@@ -713,12 +766,10 @@ fn action_clear_attention(state: &mut TuiState, client: &DaemonClient) {
     }
 }
 
-/// Kill the dashboard tmux session (and the daemon if this session started it).
-///
-/// Call this before breaking out of the event loop. Terminal cleanup is irrelevant
-/// since killing the tmux session destroys the pane.
-fn execute_quit(state: &mut TuiState) {
-    // Kill the daemon only if this session started it
+/// Begin the graceful shutdown sequence: signal processes and start the 2-second
+/// goodbye timer. The tmux session kill happens in the event loop after the timer expires.
+fn begin_quit(state: &mut TuiState) {
+    // Signal the daemon only if this session started it
     if state.started_daemon {
         if let Some(pid_path) = crate::daemon::runtime_dir().map(|d| d.join("daemon.pid")) {
             if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
@@ -732,8 +783,12 @@ fn execute_quit(state: &mut TuiState) {
         }
     }
 
-    // Kill the tmux session — this kills the TUI process itself
-    let _ = tmux::kill_session(DASHBOARD_SESSION);
+    // Signal all workspace panes (agents, terminals, editors) and record their PIDs
+    // so the event loop can monitor them and exit as soon as all have stopped.
+    state.shutdown_pids = tmux::signal_workspace_panes(DASHBOARD_SESSION);
+
+    // Start the goodbye timer; tmux kill_session fires when all PIDs exit or after 10s
+    state.shutting_down = Some(Instant::now());
 }
 
 /// Detach from the tmux session without killing the dashboard.
@@ -750,6 +805,24 @@ fn execute_detach() {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Returns true if the process with the given PID is still alive.
+/// Uses `kill -0` which checks existence without sending a real signal.
+fn pid_is_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
 
 fn format_age(last_activity: Option<&str>) -> String {
     let time_str = match last_activity {
