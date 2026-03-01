@@ -19,6 +19,7 @@ use ratatui::{
     },
     Terminal,
 };
+use std::collections::HashMap;
 use std::io;
 use std::time::{Duration, Instant};
 
@@ -29,6 +30,14 @@ enum TuiStartupState {
     Connecting,
     Connected,
     ConnectionLost,
+}
+
+/// Cached pane-open status for a single workspace, refreshed once per poll cycle.
+#[derive(Default, Clone)]
+struct WorkspacePaneStatus {
+    agent: bool,
+    term: bool,
+    edit: bool,
 }
 
 struct TuiState {
@@ -47,6 +56,8 @@ struct TuiState {
     quit_pending: bool,
     /// Branch of the last-actioned workspace (used by indicator pane).
     active_workspace: Option<String>,
+    /// Pane open/running status per workspace branch. Refreshed on each poll cycle.
+    pane_status: HashMap<String, WorkspacePaneStatus>,
 }
 
 impl TuiState {
@@ -62,6 +73,7 @@ impl TuiState {
             started_daemon: false,
             quit_pending: false,
             active_workspace: None,
+            pane_status: HashMap::new(),
         }
     }
 
@@ -196,20 +208,20 @@ fn run_event_loop(
                 }
                 Event::FocusLost => {
                     state.focused = false;
-                    // Shrink back to 44 cols when right pane exists
+                    // Shrink back to fixed width when right pane exists
                     if tmux::right_pane_exists(DASHBOARD_SESSION) {
                         tmux::resize_self_to_44_cols();
                     }
                 }
                 Event::FocusGained => {
                     state.focused = true;
-                    // Expand to 50% width when right pane exists
+                    // Expand to configured percentage when right pane exists
                     if tmux::right_pane_exists(DASHBOARD_SESSION) {
-                        tmux::resize_self_to_percent(50);
+                        tmux::resize_self_to_percent(tmux::TUI_PANE_WIDTH_PERCENT);
                     }
                 }
                 Event::Resize(_, _) => {
-                    // Restore 44-col width only when unfocused and the right pane exists.
+                    // Restore fixed-col width only when unfocused and the right pane exists.
                     // When focused, the pane should stay at 50% — don't undo FocusGained.
                     // When pane 1 just closed, we are the only pane — resizing
                     // would shrink the entire tmux window to 44 cols, leaving no
@@ -249,6 +261,29 @@ fn run_event_loop(
                 }
             }
             state.last_refresh = Instant::now();
+
+            // Update pane status cache (avoids 3× tmux subprocess per workspace per render frame)
+            let mut pane_status = HashMap::new();
+            for ws in &state.workspaces {
+                pane_status.insert(
+                    ws.branch.clone(),
+                    WorkspacePaneStatus {
+                        agent: tmux::pane_exists_in_session(
+                            DASHBOARD_SESSION,
+                            &tmux::agent_session_name(&ws.branch),
+                        ),
+                        term: tmux::pane_exists_in_session(
+                            DASHBOARD_SESSION,
+                            &tmux::terminal_session_name(&ws.branch),
+                        ),
+                        edit: tmux::pane_exists_in_session(
+                            DASHBOARD_SESSION,
+                            &tmux::editor_session_name(&ws.branch),
+                        ),
+                    },
+                );
+            }
+            state.pane_status = pane_status;
 
             // Auto-respawn welcome panel if the content pane has died
             if state.startup == TuiStartupState::Connected
@@ -363,18 +398,15 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
             .workspaces
             .iter()
             .map(|ws| {
-                let agent_running = tmux::pane_exists_in_session(
-                    DASHBOARD_SESSION,
-                    &tmux::agent_session_name(&ws.branch),
-                );
-                let term_running = tmux::pane_exists_in_session(
-                    DASHBOARD_SESSION,
-                    &tmux::terminal_session_name(&ws.branch),
-                );
-                let edit_running = tmux::pane_exists_in_session(
-                    DASHBOARD_SESSION,
-                    &tmux::editor_session_name(&ws.branch),
-                );
+                // Read pane status from cache (updated once per poll cycle)
+                let pane_status = state
+                    .pane_status
+                    .get(&ws.branch)
+                    .cloned()
+                    .unwrap_or_default();
+                let agent_running = pane_status.agent;
+                let term_running = pane_status.term;
+                let edit_running = pane_status.edit;
 
                 // Robot icon: green if agent running, DarkGray otherwise
                 let robot_style = if agent_running {
@@ -593,43 +625,43 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
 // Key actions
 // ---------------------------------------------------------------------------
 
+/// Open a named pane for a workspace in the right content slot.
+///
+/// Calls `show_pane`, updates `active_workspace` and the right-pane display
+/// title on success, or sets an ephemeral `status_message` on error.
+fn open_pane_for_workspace(
+    state: &mut TuiState,
+    title: String,
+    cmd: String,
+    cwd: std::path::PathBuf,
+    branch: String,
+) {
+    match tmux::show_pane(DASHBOARD_SESSION, &title, &cmd, &cwd) {
+        Ok(()) => {
+            state.active_workspace = Some(branch.clone());
+            tmux::set_right_pane_display_title(DASHBOARD_SESSION, &format!("Active: {}", branch));
+        }
+        Err(e) => {
+            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        }
+    }
+}
+
 fn action_agent(state: &mut TuiState) {
     if let Some(ws) = state.selected_workspace().cloned() {
         let title = tmux::agent_session_name(&ws.branch);
-        let worktree_path = std::path::Path::new(&ws.path);
-        let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
-        match tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path) {
-            Ok(()) => {
-                state.active_workspace = Some(ws.branch.clone());
-                tmux::set_right_pane_display_title(
-                    DASHBOARD_SESSION,
-                    &format!("Active: {}", ws.branch),
-                );
-            }
-            Err(e) => {
-                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
-            }
-        }
+        let cmd = ws.agent_bin.as_deref().unwrap_or("claude").to_string();
+        let cwd = std::path::PathBuf::from(&ws.path);
+        open_pane_for_workspace(state, title, cmd, cwd, ws.branch.clone());
     }
 }
 
 fn action_terminal(state: &mut TuiState) {
     if let Some(ws) = state.selected_workspace().cloned() {
         let title = tmux::terminal_session_name(&ws.branch);
-        let worktree_path = std::path::Path::new(&ws.path);
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        match tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path) {
-            Ok(()) => {
-                state.active_workspace = Some(ws.branch.clone());
-                tmux::set_right_pane_display_title(
-                    DASHBOARD_SESSION,
-                    &format!("Active: {}", ws.branch),
-                );
-            }
-            Err(e) => {
-                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
-            }
-        }
+        let cmd = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        let cwd = std::path::PathBuf::from(&ws.path);
+        open_pane_for_workspace(state, title, cmd, cwd, ws.branch.clone());
     }
 }
 
@@ -639,7 +671,11 @@ fn action_editor(state: &mut TuiState) {
             .or_else(|_| std::env::var("VISUAL"))
             .unwrap_or_else(|_| "vi".to_string());
 
-        if which::which(&editor).is_err() {
+        // Split $EDITOR into binary + optional extra args (e.g. "vim -u config")
+        let parts: Vec<&str> = editor.splitn(2, ' ').collect();
+        let editor_bin = parts[0];
+
+        if which::which(editor_bin).is_err() {
             state.status_message = Some((
                 "No editor found — set $EDITOR".to_string(),
                 std::time::Instant::now(),
@@ -648,21 +684,15 @@ fn action_editor(state: &mut TuiState) {
         }
 
         let title = tmux::editor_session_name(&ws.branch);
-        let worktree_path = std::path::Path::new(&ws.path);
-        // Open editor in workspace directory; split-window -c handles the cwd
-        let edit_cmd = format!("{} .", shell_quote(&editor));
-        match tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path) {
-            Ok(()) => {
-                state.active_workspace = Some(ws.branch.clone());
-                tmux::set_right_pane_display_title(
-                    DASHBOARD_SESSION,
-                    &format!("Active: {}", ws.branch),
-                );
-            }
-            Err(e) => {
-                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
-            }
-        }
+        let cwd = std::path::PathBuf::from(&ws.path);
+        // Shell-quote only the binary; append extra args unquoted, then "."
+        let bin = shell_quote(editor_bin);
+        let edit_cmd = if parts.len() > 1 {
+            format!("{} {} .", bin, parts[1])
+        } else {
+            format!("{} .", bin)
+        };
+        open_pane_for_workspace(state, title, edit_cmd, cwd, ws.branch.clone());
     }
 }
 
@@ -683,8 +713,6 @@ fn action_clear_attention(state: &mut TuiState, client: &DaemonClient) {
 /// Call this before breaking out of the event loop. Terminal cleanup is irrelevant
 /// since killing the tmux session destroys the pane.
 fn execute_quit(state: &mut TuiState) {
-    use crate::dashboard::DASHBOARD_SESSION;
-
     // Kill the daemon only if this session started it
     if state.started_daemon {
         if let Some(pid_path) = crate::daemon::runtime_dir().map(|d| d.join("daemon.pid")) {
@@ -700,9 +728,7 @@ fn execute_quit(state: &mut TuiState) {
     }
 
     // Kill the tmux session — this kills the TUI process itself
-    let _ = std::process::Command::new("tmux")
-        .args(["kill-session", "-t", DASHBOARD_SESSION])
-        .status();
+    let _ = tmux::kill_session(DASHBOARD_SESSION);
 }
 
 /// Detach from the tmux session without killing the dashboard.
@@ -747,7 +773,13 @@ fn format_age(last_activity: Option<&str>) -> String {
 }
 
 /// Middle-truncate a string to at most `max` chars, using "…" in the middle.
+///
+/// # Precondition
+///
+/// `max` must be ≥ 2. Smaller values are not meaningful (you cannot fit both
+/// the ellipsis character and at least one content character).
 fn truncate_middle(s: &str, max: usize) -> String {
+    debug_assert!(max >= 2, "truncate_middle: max must be >= 2");
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         return s.to_string();
@@ -772,4 +804,113 @@ fn truncate_right(s: &str, max: usize) -> String {
     }
     let trimmed: String = chars[..max.saturating_sub(1)].iter().collect();
     format!("{}\u{2026}", trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── format_age ──────────────────────────────────────────────────────────
+
+    fn rfc3339_ago(secs: i64) -> String {
+        use chrono::{Duration, Utc};
+        (Utc::now() - Duration::seconds(secs)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    }
+
+    #[test]
+    fn test_format_age_none() {
+        assert_eq!(format_age(None), "-");
+    }
+
+    #[test]
+    fn test_format_age_invalid() {
+        assert_eq!(format_age(Some("not-a-date")), "-");
+    }
+
+    #[test]
+    fn test_format_age_just_now() {
+        assert_eq!(format_age(Some(&rfc3339_ago(30))), "just now");
+    }
+
+    #[test]
+    fn test_format_age_minutes() {
+        assert_eq!(format_age(Some(&rfc3339_ago(90))), "1m");
+        assert_eq!(format_age(Some(&rfc3339_ago(3599))), "59m");
+    }
+
+    #[test]
+    fn test_format_age_hours() {
+        assert_eq!(format_age(Some(&rfc3339_ago(3600))), "1h");
+        assert_eq!(format_age(Some(&rfc3339_ago(7200))), "2h");
+    }
+
+    #[test]
+    fn test_format_age_days() {
+        assert_eq!(format_age(Some(&rfc3339_ago(86400))), "1d");
+        assert_eq!(format_age(Some(&rfc3339_ago(172800))), "2d");
+    }
+
+    // ── truncate_middle ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_truncate_middle_no_op_when_short() {
+        assert_eq!(truncate_middle("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_middle_no_op_at_exact_max() {
+        assert_eq!(truncate_middle("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_middle_truncates() {
+        let result = truncate_middle("hello world!", 8);
+        assert_eq!(result.chars().count(), 8);
+        assert!(result.contains('\u{2026}'));
+    }
+
+    #[test]
+    fn test_truncate_middle_min_valid_max() {
+        // max=2: one prefix char (0 half) + ellipsis + one suffix char
+        let result = truncate_middle("abc", 2);
+        assert_eq!(result.chars().count(), 2);
+        assert!(result.contains('\u{2026}'));
+    }
+
+    // ── truncate_right ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_truncate_right_no_op_when_short() {
+        assert_eq!(truncate_right("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_right_no_op_at_exact_max() {
+        assert_eq!(truncate_right("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_right_truncates() {
+        let result = truncate_right("hello world!", 8);
+        assert_eq!(result.chars().count(), 8);
+        assert!(result.ends_with('\u{2026}'));
+    }
+
+    // ── shell_quote ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_shell_quote_plain() {
+        assert_eq!(shell_quote("vim"), "'vim'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_spaces() {
+        assert_eq!(shell_quote("vim -u config"), "'vim -u config'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_single_quote() {
+        // it's → 'it'"'"'s'
+        assert_eq!(shell_quote("it's"), r#"'it'"'"'s'"#);
+    }
 }
