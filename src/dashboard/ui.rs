@@ -537,8 +537,14 @@ fn action_agent(state: &mut TuiState) {
         let title = tmux::agent_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
-        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path) {
-            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        match tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path) {
+            Ok(()) => {
+                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
+                state.active_workspace = Some(ws.branch.clone());
+            }
+            Err(e) => {
+                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+            }
         }
     }
 }
@@ -548,8 +554,14 @@ fn action_terminal(state: &mut TuiState) {
         let title = tmux::terminal_session_name(&ws.branch);
         let worktree_path = std::path::Path::new(&ws.path);
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path) {
-            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        match tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path) {
+            Ok(()) => {
+                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
+                state.active_workspace = Some(ws.branch.clone());
+            }
+            Err(e) => {
+                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+            }
         }
     }
 }
@@ -572,8 +584,14 @@ fn action_editor(state: &mut TuiState) {
         let worktree_path = std::path::Path::new(&ws.path);
         // Open editor in workspace directory; split-window -c handles the cwd
         let edit_cmd = format!("{} .", shell_quote(&editor));
-        if let Err(e) = tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path) {
-            state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+        match tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path) {
+            Ok(()) => {
+                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
+                state.active_workspace = Some(ws.branch.clone());
+            }
+            Err(e) => {
+                state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
+            }
         }
     }
 }

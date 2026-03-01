@@ -95,6 +95,9 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     // Split into two horizontal panes
     tmux_util::split_horizontal(DASHBOARD_SESSION)?;
 
+    // Create 1-line active workspace indicator above the right content pane
+    tmux_util::create_indicator_pane(DASHBOARD_SESSION)?;
+
     // Note: resize_pane(0, 44) is NOT called here — the session is still detached
     // so tmux doesn't know the real terminal width. The TUI resizes itself to 44 cols
     // on the first Event::Resize it receives (which fires when the client attaches).
