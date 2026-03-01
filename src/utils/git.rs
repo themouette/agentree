@@ -112,6 +112,35 @@ pub fn get_git_root() -> Result<Option<PathBuf>> {
     }
 }
 
+/// Get the root directory of the current checkout (main repo or linked worktree).
+///
+/// Unlike `get_git_root()`, this returns the top-level directory of whichever
+/// checkout the current working directory belongs to. When called from the main
+/// repo it equals `get_git_root()`; when called from inside a linked worktree
+/// it returns the worktree's own root directory.
+///
+/// Used to locate `.agentree.toml` in the current checkout before falling back
+/// to the main repository.
+pub fn get_current_checkout_root() -> Result<Option<PathBuf>> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .output()
+        .map_err(|e| AgentreeError::Git(format!("Failed to run git: {}", e)))?;
+
+    if !output.status.success() {
+        return Ok(None);
+    }
+
+    let root_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let root_path = PathBuf::from(root_dir);
+
+    if root_path.is_dir() {
+        Ok(Some(root_path.canonicalize()?))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Detect the repository's default branch from the remote origin HEAD ref.
 /// Falls back to "main" if the remote HEAD cannot be determined.
 pub fn get_default_branch() -> Result<String> {

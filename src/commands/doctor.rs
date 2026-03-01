@@ -1,6 +1,6 @@
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::get_git_root;
+use crate::utils::git::{get_current_checkout_root, get_git_root};
 use crate::worktree::{doctor, validation};
 use chrono::{DateTime, Utc};
 use clap::Parser;
@@ -61,7 +61,8 @@ pub fn execute(args: DoctorArgs) -> Result<()> {
     })?;
 
     // Load config
-    let config = config::load(&repo_root)?;
+    let checkout_root = get_current_checkout_root()?;
+    let config = config::load(&repo_root, checkout_root.as_deref())?;
 
     // Run diagnostics
     let report = doctor::diagnose(&repo_root, &config.worktree)?;

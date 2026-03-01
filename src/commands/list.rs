@@ -3,7 +3,7 @@ use crate::commands::filters::{
 };
 use crate::config;
 use crate::error::Result;
-use crate::utils::git::get_git_root;
+use crate::utils::git::{get_current_checkout_root, get_git_root};
 use crate::utils::progress::with_spinner;
 use crate::worktree::{metadata::WorktreeMetadata, operations, recovery, validation};
 use chrono::{DateTime, Local, Utc};
@@ -108,7 +108,8 @@ pub fn execute(args: ListArgs) -> Result<()> {
     })?;
 
     // Load config (for consistency and future use)
-    let _config = config::load(&repo_root)?;
+    let checkout_root = get_current_checkout_root()?;
+    let _config = config::load(&repo_root, checkout_root.as_deref())?;
 
     // Handle backward compatibility
     let format = if args.json {

@@ -46,14 +46,18 @@ fn from_file(path: &Path) -> Result<Config> {
 /// 1. **Defaults** - Built-in defaults
 /// 2. **XDG config** - `~/.config/agentree/config.toml` (Linux) or `~/Library/Application Support/agentree/config.toml` (macOS)
 /// 3. **Home config** - `~/.agentree.toml` (all platforms, overrides XDG if present)
-/// 4. **Project config** - `.agentree.toml` in repo root (overrides all global configs)
+/// 4. **Project config** - `.agentree.toml` resolved as follows:
+///    - If `worktree_root` is provided and differs from `repo_root`, the worktree's
+///      `.agentree.toml` is checked first. If it exists, it is used as the project config.
+///    - Otherwise (no worktree, or no config in the worktree), the main repo's
+///      `.agentree.toml` is used if it exists.
 ///
 /// Each config field is merged independently, so setting one field in project config
 /// doesn't clobber other fields from global config.
 ///
 /// After loading, the config is validated. Warnings are emitted to stderr, and errors
 /// cause the function to return an error.
-pub fn load(repo_root: &Path) -> Result<Config> {
+pub fn load(repo_root: &Path, worktree_root: Option<&Path>) -> Result<Config> {
     let mut config = Config::default();
 
     // Try to load XDG-compliant global config and merge
@@ -72,8 +76,14 @@ pub fn load(repo_root: &Path) -> Result<Config> {
         }
     }
 
-    // Try to load project config and merge (overrides all global configs)
-    let project_path = project_config_path(repo_root);
+    // Resolve project config path:
+    // prefer worktree's .agentree.toml (if in a worktree), fall back to main repo's.
+    let project_path = worktree_root
+        .filter(|wt| *wt != repo_root)
+        .map(|wt| wt.join(".agentree.toml"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| repo_root.join(".agentree.toml"));
+
     if project_path.exists() {
         let project_config = from_file(&project_path)?;
         config = config.merge(project_config);
@@ -198,7 +208,7 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let repo_root = temp_dir.path();
 
-        let config = load(repo_root).unwrap();
+        let config = load(repo_root, None).unwrap();
 
         // Template should be default unless overridden by global config
         // (which is rare, so we can assert on this)
@@ -226,7 +236,7 @@ mod tests {
 
         fs::write(&config_file, toml_content).unwrap();
 
-        let config = load(repo_root).unwrap();
+        let config = load(repo_root, None).unwrap();
         assert_eq!(
             config.worktree.location,
             Some("/project/worktrees".to_string())
@@ -246,7 +256,7 @@ mod tests {
         let invalid_toml = r#"[worktree invalid"#;
         fs::write(&config_file, invalid_toml).unwrap();
 
-        let result = load(repo_root);
+        let result = load(repo_root, None);
         assert!(result.is_err());
 
         match result {
@@ -270,7 +280,7 @@ mod tests {
         "#;
         fs::write(&config_file, invalid_toml).unwrap();
 
-        let result = load(repo_root);
+        let result = load(repo_root, None);
         assert!(result.is_err());
 
         match result {
@@ -296,13 +306,83 @@ mod tests {
         fs::write(&config_file, toml_content).unwrap();
 
         // Should succeed (warnings are emitted to stderr, not errors)
-        let result = load(repo_root);
+        let result = load(repo_root, None);
         assert!(result.is_ok());
 
         let config = result.unwrap();
         assert_eq!(
             config.worktree.location,
             Some("/tmp/nonexistent-worktree-path-54321".to_string())
+        );
+    }
+
+    #[test]
+    fn test_load_worktree_config_takes_priority_over_repo_config() {
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path().join("repo");
+        let worktree_root = temp_dir.path().join("worktree");
+        fs::create_dir_all(&repo_root).unwrap();
+        fs::create_dir_all(&worktree_root).unwrap();
+
+        fs::write(
+            repo_root.join(".agentree.toml"),
+            "[worktree]\nlocation = \"/repo/worktrees\"\n",
+        )
+        .unwrap();
+        fs::write(
+            worktree_root.join(".agentree.toml"),
+            "[worktree]\nlocation = \"/worktree/worktrees\"\n",
+        )
+        .unwrap();
+
+        let config = load(&repo_root, Some(&worktree_root)).unwrap();
+        assert_eq!(
+            config.worktree.location,
+            Some("/worktree/worktrees".to_string()),
+            "worktree config should take priority"
+        );
+    }
+
+    #[test]
+    fn test_load_falls_back_to_repo_config_when_no_worktree_config() {
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path().join("repo");
+        let worktree_root = temp_dir.path().join("worktree");
+        fs::create_dir_all(&repo_root).unwrap();
+        fs::create_dir_all(&worktree_root).unwrap();
+
+        // Only repo has .agentree.toml; worktree does not
+        fs::write(
+            repo_root.join(".agentree.toml"),
+            "[worktree]\nlocation = \"/repo/worktrees\"\n",
+        )
+        .unwrap();
+
+        let config = load(&repo_root, Some(&worktree_root)).unwrap();
+        assert_eq!(
+            config.worktree.location,
+            Some("/repo/worktrees".to_string()),
+            "should fall back to repo config when worktree has none"
+        );
+    }
+
+    #[test]
+    fn test_load_same_root_does_not_double_load() {
+        let temp_dir = tempdir().unwrap();
+        let repo_root = temp_dir.path().join("repo");
+        fs::create_dir_all(&repo_root).unwrap();
+
+        fs::write(
+            repo_root.join(".agentree.toml"),
+            "[worktree]\nlocation = \"/repo/worktrees\"\n",
+        )
+        .unwrap();
+
+        // When worktree_root == repo_root (main repo, not a worktree), config loads once
+        let config = load(&repo_root, Some(&repo_root)).unwrap();
+        assert_eq!(
+            config.worktree.location,
+            Some("/repo/worktrees".to_string())
         );
     }
 }
