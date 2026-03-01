@@ -169,8 +169,9 @@ pub fn bind_key_return_to_dashboard(session: &str) {
     let window = first_window_index(session);
     let pane = format!("{}:{}.0", session, window);
     let check_and_select = format!(
-        "[ \"$(tmux display-message -p '#S')\" = '{}' ] && tmux select-pane -t '{}'",
-        session, pane
+        "[ \"$(tmux display-message -p '#S')\" = {} ] && tmux select-pane -t {}",
+        shell_quote(session),
+        shell_quote(&pane)
     );
     let _ = Command::new("tmux")
         .args(["bind-key", "-n", r"C-\", "run-shell", &check_and_select])
@@ -482,7 +483,10 @@ pub fn show_welcome_panel(session: &str) {
     // `tail -f /dev/null` blocks portably across bash/zsh/sh/fish without
     // requiring shell-specific read flags. The pane stays alive until replaced
     // by show_pane (respawn-pane -k) when the user presses an action key.
-    let cmd = format!("clear; cat '{}'; tail -f /dev/null", welcome_path_str);
+    let cmd = format!(
+        "clear; cat {}; tail -f /dev/null",
+        shell_quote(&welcome_path_str)
+    );
 
     // Use HOME as cwd fallback
     let cwd = std::env::var("HOME")
@@ -536,7 +540,14 @@ fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
     // set_right_pane_display_title may update this to a friendlier label later,
     // but it must never touch @agentree_title.
     let _ = Command::new("tmux")
-        .args(["set-option", "-p", "-t", pane_id, "@agentree_display", title])
+        .args([
+            "set-option",
+            "-p",
+            "-t",
+            pane_id,
+            "@agentree_display",
+            title,
+        ])
         .output();
     Ok(())
 }
@@ -713,19 +724,19 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         let _ = set_pane_title(&new_pane_id, title);
     }
 
-    // 4. Restore the TUI pane to its fixed column width
-    let _ = Command::new("tmux")
-        .args([
-            "resize-pane",
-            "-x",
-            &TUI_PANE_WIDTH.to_string(),
-            "-t",
-            &left_id,
-        ])
-        .output();
-
-    // 5. Give keyboard focus to the right pane
-    focus_right_pane(session);
+    // 4+5. Restore TUI pane width and give keyboard focus to the right pane.
+    //      One list_pane_ids call covers both steps.
+    let updated_panes = list_pane_ids(session);
+    if let Some(lid) = updated_panes.first() {
+        let _ = Command::new("tmux")
+            .args(["resize-pane", "-x", &TUI_PANE_WIDTH.to_string(), "-t", lid])
+            .output();
+    }
+    if let Some(rid) = updated_panes.get(1) {
+        let _ = Command::new("tmux")
+            .args(["select-pane", "-t", rid])
+            .output();
+    }
 
     Ok(())
 }
@@ -838,6 +849,12 @@ fn signal_pid_tree(pid: u32) {
     }
 }
 
+/// Wrap a string in single quotes with internal single quotes escaped.
+/// Safe for embedding in POSIX shell command strings.
+pub(crate) fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r#"'"'"'"#))
+}
+
 /// Kill all stash panes belonging to a workspace branch.
 ///
 /// Matches panes whose title starts with `agentree-{safe_branch}`.
@@ -882,6 +899,24 @@ pub fn kill_workspace_panes(session: &str, branch: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── shell_quote ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_shell_quote_plain() {
+        assert_eq!(shell_quote("vim"), "'vim'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_spaces() {
+        assert_eq!(shell_quote("vim -u config"), "'vim -u config'");
+    }
+
+    #[test]
+    fn test_shell_quote_with_single_quote() {
+        // it's → 'it'"'"'s'
+        assert_eq!(shell_quote("it's"), r#"'it'"'"'s'"#);
+    }
 
     #[test]
     fn test_agent_session_name_sanitizes_slash() {
