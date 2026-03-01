@@ -164,7 +164,10 @@ fn ensure_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) -> 
         .ok_or_else(|| AgentreeError::ConfigError("allowedTools is not an array".into()))?;
 
     for entry in &required {
-        if !allowed.iter().any(|v: &serde_json::Value| v.as_str() == Some(entry.as_str())) {
+        if !allowed
+            .iter()
+            .any(|v: &serde_json::Value| v.as_str() == Some(entry.as_str()))
+        {
             allowed.push(serde_json::json!(entry));
         }
     }
@@ -581,10 +584,8 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
     // Build git command with appropriate force flags
     let mut args = vec!["worktree", "remove"];
 
-    // Add force flags based on level (compatible with older Rust versions)
-    // Note: Using repeat().take() instead of repeat_n() for broader Rust version compatibility
-    #[allow(clippy::manual_repeat_n)]
-    args.extend(std::iter::repeat("--force").take(force_level.flag_count()));
+    // Add force flags based on level
+    args.extend(std::iter::repeat_n("--force", force_level.flag_count()));
 
     args.push(&path_str);
 

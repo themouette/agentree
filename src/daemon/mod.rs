@@ -149,8 +149,8 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
     }
 
     // Graceful drain: stop accepting, allow in-flight one-shot requests to complete
-    // The one-shot protocol resolves in <100ms; 5s is generous.
-    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+    // The one-shot protocol resolves in <100ms; 500ms is 5× headroom.
+    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
     // Cleanup runtime files
     cleanup_runtime_files(&sock_path, &pid_file);
