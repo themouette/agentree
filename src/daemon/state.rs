@@ -12,7 +12,7 @@ pub struct DaemonState {
 
 impl DaemonState {
     pub fn new(repo_root: PathBuf) -> Self {
-        let default_agent = crate::config::load(&repo_root)
+        let default_agent = crate::config::load(&repo_root, None)
             .ok()
             .and_then(|c| c.resolve_agent(None).ok())
             .map(|(bin, _)| bin);
