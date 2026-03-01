@@ -150,50 +150,43 @@ fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Add `.agentree/` to the shared git `info/exclude` file so it is not tracked.
+/// Resolve the git common directory for a worktree using `git rev-parse`.
 ///
-/// Resolves `$GIT_COMMON_DIR` from the worktree's `.git` file and `commondir`,
-/// then appends `.agentree/` to `$GIT_COMMON_DIR/info/exclude` if not already present.
-fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
-    // Read the .git file/directory in worktree_path
-    let git_path = worktree_path.join(".git");
-    if !git_path.exists() {
+/// Runs `git -C worktree_path rev-parse --git-common-dir` and canonicalizes
+/// the result (which may be relative to `worktree_path`).
+fn resolve_git_common_dir(worktree_path: &Path) -> Result<PathBuf> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree_path)
+        .args(["rev-parse", "--git-common-dir"])
+        .output()
+        .map_err(|e| AgentreeError::Git(format!("Failed to run git: {}", e)))?;
+
+    if !output.status.success() {
         return Err(AgentreeError::Git(
-            "No .git file or directory found in worktree".to_string(),
+            "git rev-parse --git-common-dir failed".to_string(),
         ));
     }
 
-    // Determine gitdir: if .git is a file, it's a worktree link; if a dir, it's the main repo
-    let gitdir = if git_path.is_file() {
-        let content = std::fs::read_to_string(&git_path).map_err(AgentreeError::Io)?;
-        // Content is like: "gitdir: /path/to/main/.git/worktrees/branch"
-        let line = content
-            .lines()
-            .next()
-            .ok_or_else(|| AgentreeError::Git("Empty .git file".to_string()))?;
-        let path_str = line
-            .strip_prefix("gitdir: ")
-            .ok_or_else(|| AgentreeError::Git(format!("Unexpected .git content: {}", line)))?
-            .trim();
-        PathBuf::from(path_str)
+    let common_dir_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let common_dir = PathBuf::from(&common_dir_str);
+
+    // git may output a relative path (relative to the worktree directory)
+    let resolved = if common_dir.is_absolute() {
+        common_dir
     } else {
-        git_path.clone()
+        worktree_path.join(common_dir)
     };
 
-    // Resolve common dir from gitdir/commondir file
-    let common_dir = {
-        let commondir_file = gitdir.join("commondir");
-        if commondir_file.exists() {
-            let rel = std::fs::read_to_string(&commondir_file).map_err(AgentreeError::Io)?;
-            let rel = rel.trim();
-            // rel is relative to gitdir; resolve canonically
-            let candidate = gitdir.join(rel);
-            candidate.canonicalize().map_err(AgentreeError::Io)?
-        } else {
-            // No commondir means gitdir IS the common dir (main repo case)
-            gitdir.canonicalize().map_err(AgentreeError::Io)?
-        }
-    };
+    resolved.canonicalize().map_err(AgentreeError::Io)
+}
+
+/// Add `.agentree/` to the shared git `info/exclude` file so it is not tracked.
+///
+/// Resolves `$GIT_COMMON_DIR` via `git rev-parse --git-common-dir`, then appends
+/// `.agentree/` to `$GIT_COMMON_DIR/info/exclude` if not already present.
+fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
+    let common_dir = resolve_git_common_dir(worktree_path)?;
 
     // Ensure info/ directory exists
     let info_dir = common_dir.join("info");
