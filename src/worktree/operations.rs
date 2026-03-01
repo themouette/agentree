@@ -126,6 +126,47 @@ impl ForceLevel {
     }
 }
 
+/// Ensure `.claude/settings.json` contains `allowedTools` entries for `.agentree/**`.
+///
+/// If the file does not exist, it is created from the template. If it already
+/// exists, any missing entries are appended to the `allowedTools` array so that
+/// pre-existing project settings are preserved.
+fn ensure_agentree_allowed_tools(settings_path: &Path) -> Result<()> {
+    const REQUIRED: &[&str] = &["Write(.agentree/**)", "Edit(.agentree/**)"];
+
+    if !settings_path.exists() {
+        std::fs::write(
+            settings_path,
+            include_str!("../../templates/claude-settings.json"),
+        )
+        .map_err(AgentreeError::Io)?;
+        return Ok(());
+    }
+
+    // Parse existing file; treat unparseable content as an empty object
+    let raw = std::fs::read_to_string(settings_path).map_err(AgentreeError::Io)?;
+    let mut value: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+
+    let allowed = value
+        .as_object_mut()
+        .ok_or_else(|| AgentreeError::ConfigError("settings.json root is not an object".into()))?
+        .entry("allowedTools")
+        .or_insert(serde_json::json!([]))
+        .as_array_mut()
+        .ok_or_else(|| AgentreeError::ConfigError("allowedTools is not an array".into()))?;
+
+    for entry in REQUIRED {
+        if !allowed.iter().any(|v: &serde_json::Value| v.as_str() == Some(entry)) {
+            allowed.push(serde_json::json!(entry));
+        }
+    }
+
+    let updated = serde_json::to_string_pretty(&value)?;
+    std::fs::write(settings_path, updated + "\n").map_err(AgentreeError::Io)?;
+    Ok(())
+}
+
 /// Set up the .agentree/ workspace directory in a newly created worktree.
 ///
 /// Creates the `.agentree/` directory, writes `CLAUDE.md` to the worktree root
@@ -142,7 +183,14 @@ fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
             .map_err(AgentreeError::Io)?;
     }
 
-    // 3. Add .agentree/ to git exclude (non-critical, log warning on failure)
+    // 3. Ensure .claude/settings.json grants auto-approval for .agentree/ writes.
+    //    If the file already exists, merge the entries rather than overwrite.
+    let claude_dir = worktree_path.join(".claude");
+    std::fs::create_dir_all(&claude_dir).map_err(AgentreeError::Io)?;
+    let settings_path = claude_dir.join("settings.json");
+    ensure_agentree_allowed_tools(&settings_path)?;
+
+    // 4. Add .agentree/ to git exclude (non-critical, log warning on failure)
     if let Err(e) = add_agentree_to_git_exclude(worktree_path) {
         eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
     }

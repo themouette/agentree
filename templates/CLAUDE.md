@@ -24,7 +24,15 @@ single-line display (clean slate for next session).
 
 ## Requesting Human Attention
 
-Write `.agentree/attention.md` when blocked or needing human input:
+Write `.agentree/attention.md` when blocked or needing human input **— including
+before any tool call that requires user approval**. Do not silently wait for
+the permission prompt to be noticed; signal first, then make the call. Example:
+
+```
+Need permission to run: cargo fmt
+```
+
+More generally, write `.agentree/attention.md` when blocked or needing human input:
 
 ```
 Need OPENAI_API_KEY to proceed with integration tests.
