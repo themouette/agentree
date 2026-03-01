@@ -2,7 +2,7 @@ use crate::backend::{BackendKind, DockerSandboxBackend};
 use crate::commands::filters::{check_worktree_dirty, resolve_head_sentinel, WorktreeFilterArgs};
 use crate::config;
 use crate::error::{AgentreeError, Result};
-use crate::utils::git::get_git_root;
+use crate::utils::git::{get_current_checkout_root, get_git_root};
 use crate::utils::progress::with_spinner;
 use crate::worktree::operations::ForceLevel;
 use crate::worktree::{operations, recovery, validation};
@@ -94,7 +94,8 @@ pub fn execute(args: RemoveArgs) -> Result<()> {
     })?;
 
     // Load config to determine backend and for cleanup
-    let config = config::load(&repo_root)?;
+    let checkout_root = get_current_checkout_root()?;
+    let config = config::load(&repo_root, checkout_root.as_deref())?;
 
     // Filter mode: no explicit branches given — select candidates via filter flags
     if args.branches.is_empty() {

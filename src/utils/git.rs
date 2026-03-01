@@ -90,9 +90,38 @@ pub fn is_worktree() -> bool {
     false
 }
 
-/// Get the root directory of the git repository
-/// This returns the top-level directory containing the .git folder
+/// Get the root directory of the main git repository.
+///
+/// When called from inside a linked worktree, this returns the **main**
+/// repository's root directory, not the worktree's own top-level directory.
+/// This ensures consistent path resolution (worktree location, repo name)
+/// regardless of whether the current working directory is the main repo or
+/// one of its linked worktrees.
+///
+/// Internally uses `--git-common-dir` (which always points to the main repo's
+/// `.git` directory) and returns its parent.
 pub fn get_git_root() -> Result<Option<PathBuf>> {
+    match get_git_common_dir()? {
+        None => Ok(None),
+        Some(git_common_dir) => {
+            let root = git_common_dir.parent().ok_or_else(|| {
+                AgentreeError::Git("Cannot determine parent of git common dir".to_string())
+            })?;
+            Ok(Some(root.to_path_buf()))
+        }
+    }
+}
+
+/// Get the root directory of the current checkout (main repo or linked worktree).
+///
+/// Unlike `get_git_root()`, this returns the top-level directory of whichever
+/// checkout the current working directory belongs to. When called from the main
+/// repo it equals `get_git_root()`; when called from inside a linked worktree
+/// it returns the worktree's own root directory.
+///
+/// Used to locate `.agentree.toml` in the current checkout before falling back
+/// to the main repository.
+pub fn get_current_checkout_root() -> Result<Option<PathBuf>> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
         .output()

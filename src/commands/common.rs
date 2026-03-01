@@ -100,13 +100,13 @@ impl WorkspaceContext {
         editor: Option<&str>,
     ) -> Result<Self> {
         use crate::backend::BackendRegistry;
-        use crate::utils::git::get_git_root;
+        use crate::utils::git::{get_current_checkout_root, get_git_root};
         use crate::worktree::validation;
 
         // Check git version
         validation::check_git_version()?;
 
-        // Find repository root
+        // Find repository root (always the main repo, even when in a worktree)
         let repo_root = get_git_root()?.ok_or_else(|| {
             crate::error::AgentreeError::Worktree(
                 "Not in a git repository. Run this command from inside a git repository."
@@ -114,16 +114,15 @@ impl WorkspaceContext {
             )
         })?;
 
+        // Find the current checkout root (may differ from repo_root when in a worktree)
+        let checkout_root = get_current_checkout_root()?;
+
         // Check for submodules and warn
         validation::check_submodules_and_warn(&repo_root);
 
         // Load config from files and apply CLI overrides
-        let config = crate::config::load(&repo_root)?.with_cli_overrides(
-            backend,
-            worktree_location,
-            agent,
-            editor,
-        )?;
+        let config = crate::config::load(&repo_root, checkout_root.as_deref())?
+            .with_cli_overrides(backend, worktree_location, agent, editor)?;
 
         // Validate the effective backend before proceeding
         let backend_kind = config.effective_backend();
