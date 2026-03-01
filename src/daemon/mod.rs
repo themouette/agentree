@@ -79,7 +79,13 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
         tick.tick().await; // skip first immediate tick
         loop {
             tick.tick().await;
-            let _ = state_rescan.refresh_all();
+            // refresh_all spawns git subprocesses — run on blocking thread pool
+            let state = Arc::clone(&state_rescan);
+            tokio::task::spawn_blocking(move || {
+                let _ = state.refresh_all();
+            })
+            .await
+            .ok();
             let new_paths: Vec<PathBuf> = state_rescan
                 .get_all_agentree_paths()
                 .into_iter()
@@ -96,7 +102,11 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
     tokio::spawn(async move {
         while let Some(changed_path) = watcher_rx.recv().await {
             if let Some(branch) = state_watch.find_branch_for_path(&changed_path) {
-                state_watch.update_workspace(&branch);
+                // update_workspace spawns git subprocesses — run on blocking thread pool
+                let state = Arc::clone(&state_watch);
+                tokio::task::spawn_blocking(move || state.update_workspace(&branch))
+                    .await
+                    .ok();
             }
         }
     });
