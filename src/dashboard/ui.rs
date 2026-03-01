@@ -391,7 +391,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         let list_width = inner[1].width.saturating_sub(2) as usize;
         // Layout within each row (approximate):
         // " 🤖 "(4) + ">_ "(3) + "E "(2) + attention(2) + branch(variable) + stats(8) + age(7) + spaces(3)
-        // robot=4 (space+emoji+space = 4 visible), term=3, edit=2, attention=2, stats=8, age=7, spaces=3
+        // agent=4 (space+emoji[2]+space, or 4 spaces when idle), term=3, edit=2, attention=2, stats=8, age=7, spaces=3
         let branch_width = list_width.saturating_sub(4 + 3 + 2 + 2 + 8 + 7 + 3).max(6);
 
         let items: Vec<ListItem> = state
@@ -408,12 +408,8 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                 let term_running = pane_status.term;
                 let edit_running = pane_status.edit;
 
-                // Robot icon: green if agent running, DarkGray otherwise
-                let robot_style = if agent_running {
-                    Style::default().fg(Color::Green)
-                } else {
-                    Style::default().fg(Color::DarkGray)
-                };
+                // Agent icon: robot emoji when running, blank space when idle.
+                // Emoji cannot be recolored by ANSI foreground, so presence/absence is used instead.
                 let term_style = if term_running {
                     Style::default().fg(Color::Green)
                 } else {
@@ -473,7 +469,11 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                 let stats_str = format!("{:>3} {:>3}", ahead_str, changed_str);
 
                 let spans = vec![
-                    Span::styled(" \u{1F916} ", robot_style),
+                    if agent_running {
+                        Span::raw(" \u{1F916} ")
+                    } else {
+                        Span::raw("    ")
+                    },
                     Span::styled(">_ ", term_style),
                     Span::styled("E ", edit_style),
                     Span::styled(attention_str, attention_style),
