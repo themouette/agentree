@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-02-28T23:59:32.039Z"
+last_updated: "2026-03-01T00:10:01.261Z"
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 14
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -79,6 +79,8 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 - [Phase 06-01]: Footer uses no block/border — single Paragraph at Constraint::Length(1), freeing 2 rows for the workspace list
 - [Phase 06-01]: item_style = Style::default() always — yellow row background conflicted with blue selection highlight; attention conveyed per-span only
 - [Phase 06-01]: phase_tag truncated to 12 chars; visible_items = floor((inner_height - 2) / 2) for scrollbar threshold; Scrollbar rendered only when list overflows
+- [Phase 06]: All 5 Phase 6 UI improvements confirmed correct by human smoke test — no follow-up issues
+- [Phase 06]: Phase 06-improve-the-ui is closed; all requirements UI-01 through UI-05 verified
 
 ## Performance Metrics
 
@@ -97,6 +99,7 @@ Progress: [████████░░░░░░░░░░░░] 3/5 pha
 | 04    | 03   | ~5min    | 2     | 0     |
 | 06    | 02   | 3min     | 2     | 5     |
 | Phase 06-improve-the-ui P01 | 5min | 3 tasks | 1 files |
+| Phase 06 P03 | 2min | 2 tasks | 0 files |
 
 ## Last Session
 
