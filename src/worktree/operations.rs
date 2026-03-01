@@ -177,35 +177,191 @@ fn ensure_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) -> 
     Ok(())
 }
 
-/// Set up the .agentree/ workspace directory in a newly created worktree.
-///
-/// Creates the `.agentree/` directory, writes `CLAUDE.md` to the worktree root
-/// (only if none already exists), and attempts to exclude `.agentree/` from
-/// git tracking via the shared `info/exclude` file.
-fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
-    // 1. Create .agentree/ directory
-    std::fs::create_dir_all(worktree_path.join(".agentree")).map_err(AgentreeError::Io)?;
+const AGENTREE_START: &str = "<!-- agentree:start -->";
+const AGENTREE_END: &str = "<!-- agentree:end -->";
 
-    // 2. Write CLAUDE.md only if no CLAUDE.md exists in worktree root
-    let claude_md_path = worktree_path.join("CLAUDE.md");
-    if !claude_md_path.exists() {
-        std::fs::write(&claude_md_path, include_str!("../../templates/CLAUDE.md"))
+/// State captured during agent-session setup so cleanup can undo the same steps.
+pub(crate) struct AgentSessionSetup {
+    /// Whether `.claude/` was created by `setup_agent_session` (for cleanup).
+    claude_dir_created: bool,
+}
+
+/// Inject the agentree CLAUDE.md block into `path`.
+///
+/// The content is wrapped in XML markers so it can be cleanly extracted later:
+/// ```text
+/// <!-- agentree:start -->
+/// <template content>
+/// <!-- agentree:end -->
+/// ```
+///
+/// Idempotent: if `<!-- agentree:start -->` is already present, does nothing.
+/// Appends to an existing file; creates the file if it does not exist.
+fn inject_agentree_block(path: &Path) -> Result<()> {
+    let template = include_str!("../../templates/CLAUDE.md");
+    let block = format!("{}\n{}{}\n", AGENTREE_START, template, AGENTREE_END);
+
+    if path.exists() {
+        let content = std::fs::read_to_string(path).map_err(AgentreeError::Io)?;
+        if content.contains(AGENTREE_START) {
+            return Ok(()); // already injected
+        }
+        let separator = if content.ends_with('\n') { "\n" } else { "\n\n" };
+        std::fs::write(path, format!("{}{}{}", content, separator, block))
             .map_err(AgentreeError::Io)?;
+    } else {
+        std::fs::write(path, &block).map_err(AgentreeError::Io)?;
+    }
+    Ok(())
+}
+
+/// Remove the `<!-- agentree:start -->…<!-- agentree:end -->` block from `path`.
+///
+/// Non-fatal: all errors are silently ignored.
+/// Deletes the file if it becomes empty (only whitespace) after removal.
+fn remove_agentree_block(path: &Path) {
+    if !path.exists() {
+        return;
+    }
+    let content = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+
+    let start_pos = match content.find(AGENTREE_START) {
+        Some(p) => p,
+        None => return,
+    };
+    let end_pos = match content.find(AGENTREE_END) {
+        Some(p) => p,
+        None => return,
+    };
+
+    // Byte offset just past `<!-- agentree:end -->`, skipping one trailing newline
+    let end_byte = end_pos + AGENTREE_END.len();
+    let end_byte = if content.as_bytes().get(end_byte) == Some(&b'\n') {
+        end_byte + 1
+    } else {
+        end_byte
+    };
+
+    let before = &content[..start_pos];
+    let after = &content[end_byte..];
+
+    let remaining = match (before.trim().is_empty(), after.trim().is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => after.trim_start_matches('\n').to_string(),
+        (false, true) => format!("{}\n", before.trim_end_matches('\n')),
+        (false, false) => format!(
+            "{}\n{}",
+            before.trim_end_matches('\n'),
+            after.trim_start_matches('\n')
+        ),
+    };
+
+    if remaining.trim().is_empty() {
+        let _ = std::fs::remove_file(path);
+    } else {
+        let final_content = if remaining.ends_with('\n') {
+            remaining
+        } else {
+            remaining + "\n"
+        };
+        let _ = std::fs::write(path, final_content);
+    }
+}
+
+/// Remove agentree's `allowedTools` entries from `.claude/settings.json`.
+///
+/// Non-fatal: all errors are silently ignored.
+/// Deletes the file if it would become `{}` after removal.
+fn remove_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) {
+    if !settings_path.exists() {
+        return;
+    }
+    let abs = worktree_path
+        .canonicalize()
+        .unwrap_or_else(|_| worktree_path.to_path_buf());
+    let abs_agentree = abs.join(".agentree").to_string_lossy().into_owned();
+
+    let to_remove: Vec<String> = vec![
+        "Write(.agentree/**)".into(),
+        "Edit(.agentree/**)".into(),
+        format!("Write({}/**)", abs_agentree),
+        format!("Edit({}/**)", abs_agentree),
+    ];
+
+    let raw = match std::fs::read_to_string(settings_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+
+    if let Some(arr) = obj.get_mut("allowedTools").and_then(|v| v.as_array_mut()) {
+        arr.retain(|v| v.as_str().map_or(true, |s| !to_remove.iter().any(|r| r == s)));
+        if arr.is_empty() {
+            obj.remove("allowedTools");
+        }
     }
 
-    // 3. Ensure .claude/settings.json grants auto-approval for .agentree/ writes.
-    //    If the file already exists, merge the entries rather than overwrite.
+    if obj.is_empty() {
+        let _ = std::fs::remove_file(settings_path);
+    } else if let Ok(updated) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(settings_path, updated + "\n");
+    }
+}
+
+/// Set up `CLAUDE.md` and `.claude/settings.json` for an agent session.
+///
+/// Call this immediately before starting an agent process. Returns an
+/// [`AgentSessionSetup`] token that must be passed to [`cleanup_agent_session`]
+/// when the agent exits.
+pub(crate) fn setup_agent_session(worktree_path: &Path) -> Result<AgentSessionSetup> {
     let claude_dir = worktree_path.join(".claude");
-    std::fs::create_dir_all(&claude_dir).map_err(AgentreeError::Io)?;
+    let claude_dir_created = !claude_dir.exists();
+    if claude_dir_created {
+        std::fs::create_dir_all(&claude_dir).map_err(AgentreeError::Io)?;
+    }
+
+    // Inject agentree block into CLAUDE.md (idempotent)
+    inject_agentree_block(&worktree_path.join("CLAUDE.md"))?;
+
+    // Merge our allowedTools entries into settings.json
     let settings_path = claude_dir.join("settings.json");
     ensure_agentree_allowed_tools(&settings_path, worktree_path)?;
 
-    // 4. Add .agentree/ to git exclude (non-critical, log warning on failure)
-    if let Err(e) = add_agentree_to_git_exclude(worktree_path) {
-        eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
-    }
+    Ok(AgentSessionSetup { claude_dir_created })
+}
 
-    Ok(())
+/// Clean up `CLAUDE.md` and `.claude/settings.json` after an agent session ends.
+///
+/// Best-effort: all errors are silently ignored so the agent's exit status is
+/// always propagated to the caller unchanged.
+pub(crate) fn cleanup_agent_session(worktree_path: &Path, setup: &AgentSessionSetup) {
+    // 1. Remove agentree block from CLAUDE.md (delete file if now empty)
+    remove_agentree_block(&worktree_path.join("CLAUDE.md"));
+
+    let claude_dir = worktree_path.join(".claude");
+
+    // 2. Remove our entries from settings.json (delete file if now empty)
+    remove_agentree_allowed_tools(&claude_dir.join("settings.json"), worktree_path);
+
+    // 3. Remove .claude/ if we created it and it is now empty
+    if setup.claude_dir_created {
+        if let Ok(mut entries) = std::fs::read_dir(&claude_dir) {
+            if entries.next().is_none() {
+                let _ = std::fs::remove_dir(&claude_dir);
+            }
+        }
+    }
 }
 
 /// Resolve the git common directory for a worktree using `git rev-parse`.
@@ -474,9 +630,12 @@ pub fn create_worktree(
             run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
 
-            if let Err(e) = setup_agentree_workspace(&worktree_path) {
-                eprintln!("Warning: could not set up .agentree/ workspace: {}", e);
-                // Non-fatal: worktree was created, status protocol just won't work
+            // Create .agentree/ and register with git exclude (non-critical)
+            if let Err(e) = std::fs::create_dir_all(worktree_path.join(".agentree")) {
+                eprintln!("Warning: could not create .agentree/ directory: {}", e);
+            }
+            if let Err(e) = add_agentree_to_git_exclude(&worktree_path) {
+                eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
             }
 
             Ok(if is_remote_checkout {
@@ -510,9 +669,12 @@ pub fn create_worktree(
             run_git_command_no_timeout(&args, "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
 
-            if let Err(e) = setup_agentree_workspace(&worktree_path) {
-                eprintln!("Warning: could not set up .agentree/ workspace: {}", e);
-                // Non-fatal: worktree was created, status protocol just won't work
+            // Create .agentree/ and register with git exclude (non-critical)
+            if let Err(e) = std::fs::create_dir_all(worktree_path.join(".agentree")) {
+                eprintln!("Warning: could not create .agentree/ directory: {}", e);
+            }
+            if let Err(e) = add_agentree_to_git_exclude(&worktree_path) {
+                eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
             }
 
             Ok(CreateResult::CreatedWithBranch(worktree_path))
@@ -880,5 +1042,120 @@ mod tests {
             }
             assert_returns_create_result(ensure_workspace);
         }
+    }
+
+    // ── agent session setup/cleanup tests ────────────────────────────────────
+
+    #[test]
+    fn test_setup_creates_files_in_empty_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        let setup = setup_agent_session(path).unwrap();
+
+        // CLAUDE.md created with markers and template content
+        let claude_md = std::fs::read_to_string(path.join("CLAUDE.md")).unwrap();
+        assert!(claude_md.contains(AGENTREE_START));
+        assert!(claude_md.contains(AGENTREE_END));
+        assert!(claude_md.contains("Agentree Status Protocol"));
+
+        // settings.json created with allowedTools entries
+        let settings_raw =
+            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        assert!(settings_raw.contains("Write(.agentree/**)"));
+        assert!(settings_raw.contains("Edit(.agentree/**)"));
+
+        // .claude/ was freshly created
+        assert!(setup.claude_dir_created);
+    }
+
+    #[test]
+    fn test_cleanup_removes_files_when_no_other_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        let setup = setup_agent_session(path).unwrap();
+        cleanup_agent_session(path, &setup);
+
+        // CLAUDE.md gone (only contained the agentree block)
+        assert!(!path.join("CLAUDE.md").exists());
+        // .claude/ gone (we created it and it is now empty)
+        assert!(!path.join(".claude").exists());
+    }
+
+    #[test]
+    fn test_cleanup_preserves_existing_claude_md_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        // Pre-existing project CLAUDE.md
+        let existing = "# My Project\n\nSome project documentation.\n";
+        std::fs::write(path.join("CLAUDE.md"), existing).unwrap();
+
+        let setup = setup_agent_session(path).unwrap();
+
+        // After setup both existing content and agentree block are present
+        let content = std::fs::read_to_string(path.join("CLAUDE.md")).unwrap();
+        assert!(content.contains("# My Project"));
+        assert!(content.contains(AGENTREE_START));
+
+        cleanup_agent_session(path, &setup);
+
+        // After cleanup only the original content remains
+        let content = std::fs::read_to_string(path.join("CLAUDE.md")).unwrap();
+        assert!(content.contains("# My Project"));
+        assert!(!content.contains(AGENTREE_START));
+        assert!(!content.contains(AGENTREE_END));
+    }
+
+    #[test]
+    fn test_cleanup_preserves_extra_settings_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        // Pre-create .claude/ with settings.json containing an unrelated key
+        let claude_dir = path.join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(
+            claude_dir.join("settings.json"),
+            r#"{"someOtherKey": "value"}"#,
+        )
+        .unwrap();
+
+        let setup = setup_agent_session(path).unwrap();
+        // .claude/ was not created by us
+        assert!(!setup.claude_dir_created);
+
+        cleanup_agent_session(path, &setup);
+
+        // settings.json still exists with the other key, but allowedTools removed
+        let raw = std::fs::read_to_string(claude_dir.join("settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["someOtherKey"], "value");
+        assert!(value.get("allowedTools").is_none());
+    }
+
+    #[test]
+    fn test_setup_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+
+        setup_agent_session(path).unwrap();
+        setup_agent_session(path).unwrap(); // second call must not duplicate
+
+        // Marker appears exactly once
+        let content = std::fs::read_to_string(path.join("CLAUDE.md")).unwrap();
+        assert_eq!(content.matches(AGENTREE_START).count(), 1);
+
+        // Each allowedTools entry appears exactly once
+        let raw =
+            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let tools = value["allowedTools"].as_array().unwrap();
+        let write_count = tools
+            .iter()
+            .filter(|v| v.as_str() == Some("Write(.agentree/**)"))
+            .count();
+        assert_eq!(write_count, 1);
     }
 }
