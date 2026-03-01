@@ -81,13 +81,7 @@ pub fn resize_pane(session: &str, pane: u8, width: u16) -> Result<()> {
     let window = first_window_index(session);
     let target = format!("{}:{}.{}", session, window, pane);
     Command::new("tmux")
-        .args([
-            "resize-pane",
-            "-x",
-            &width.to_string(),
-            "-t",
-            &target,
-        ])
+        .args(["resize-pane", "-x", &width.to_string(), "-t", &target])
         .status()
         .map_err(|e| AgentreeError::TmuxError(format!("resize-pane failed: {}", e)))?;
     Ok(())
@@ -310,7 +304,10 @@ pub fn resize_self_to_44_cols() {
 /// exists beyond the left TUI pane.
 pub fn right_pane_exists(session: &str) -> bool {
     let pane_ids = list_pane_ids(session);
-    pane_ids.iter().skip(1).any(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
+    pane_ids
+        .iter()
+        .skip(1)
+        .any(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
 }
 
 /// Returns true if pane 0 in the given session's window 0 has its process exited.
@@ -385,9 +382,7 @@ pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> 
             let status = Command::new("tmux")
                 .args(["respawn-pane", "-k", "-t", &pane_id, cmd])
                 .status()
-                .map_err(|e| {
-                    AgentreeError::TmuxError(format!("respawn-pane failed: {}", e))
-                })?;
+                .map_err(|e| AgentreeError::TmuxError(format!("respawn-pane failed: {}", e)))?;
             if !status.success() {
                 return Err(AgentreeError::TmuxError(format!(
                     "tmux respawn-pane failed for session '{}'",
@@ -425,12 +420,20 @@ pub fn create_indicator_pane(session: &str) -> Result<()> {
     // -d: do not select the new pane (keep focus on current pane)
     let out = Command::new("tmux")
         .args([
-            "split-window", "-v", "-l", "1", "-b", "-d",
-            "-t", &right_id,
+            "split-window",
+            "-v",
+            "-l",
+            "1",
+            "-b",
+            "-d",
+            "-t",
+            &right_id,
             "printf 'No active workspace'; read",
         ])
         .output()
-        .map_err(|e| AgentreeError::TmuxError(format!("split-window for indicator failed: {}", e)))?;
+        .map_err(|e| {
+            AgentreeError::TmuxError(format!("split-window for indicator failed: {}", e))
+        })?;
     if !out.status.success() {
         return Err(AgentreeError::TmuxError(format!(
             "tmux split-window (indicator) failed: {}",
@@ -458,9 +461,10 @@ pub fn update_indicator(session: &str, branch: &str) {
     // Find indicator pane by title in the main window
     let pane_ids = list_pane_ids(session);
     // The indicator is always pane_ids[1] by construction, but verify via title
-    let indicator_id = pane_ids.iter().find(|id| {
-        get_pane_title(id) == INDICATOR_PANE_TITLE
-    }).cloned();
+    let indicator_id = pane_ids
+        .iter()
+        .find(|id| get_pane_title(id) == INDICATOR_PANE_TITLE)
+        .cloned();
 
     // Fallback: if title lookup fails, use index [1] directly
     let target = match indicator_id {
@@ -468,7 +472,7 @@ pub fn update_indicator(session: &str, branch: &str) {
         None => match pane_ids.get(1) {
             Some(id) => id.clone(),
             None => return,
-        }
+        },
     };
 
     // Use printf + read to display text and keep pane alive
@@ -579,7 +583,11 @@ pub fn resize_self_to_percent(percent: u8) {
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {
         let _ = Command::new("tmux")
             .args([
-                "resize-pane", "-x", &format!("{}%", percent), "-t", &pane_id,
+                "resize-pane",
+                "-x",
+                &format!("{}%", percent),
+                "-t",
+                &pane_id,
             ])
             .output();
     }
@@ -642,7 +650,14 @@ fn get_pane_title(pane_id: &str) -> String {
 /// Find a pane anywhere in the session by its title. Returns the pane ID if found.
 fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
     let out = Command::new("tmux")
-        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_id} #{pane_title}"])
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            session,
+            "-F",
+            "#{pane_id} #{pane_title}",
+        ])
         .output()
         .ok()?;
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -692,9 +707,11 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
     // 2. If a content pane exists (first non-indicator pane after left):
     //    park named panes via break-pane, kill unnamed ones.
     //    Skip the indicator pane (INDICATOR_PANE_TITLE) — it must persist.
-    let content_pane_id = main_panes.iter().skip(1).find(|id| {
-        get_pane_title(id) != INDICATOR_PANE_TITLE
-    }).cloned();
+    let content_pane_id = main_panes
+        .iter()
+        .skip(1)
+        .find(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
+        .cloned();
 
     if let Some(right_id) = content_pane_id {
         let right_title = get_pane_title(&right_id);
@@ -724,8 +741,16 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         let cwd_str = cwd.to_string_lossy();
         let out = Command::new("tmux")
             .args([
-                "new-window", "-d", "-P", "-F", "#{pane_id}",
-                "-t", session, "-c", &cwd_str, cmd,
+                "new-window",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-t",
+                session,
+                "-c",
+                &cwd_str,
+                cmd,
             ])
             .output()
             .map_err(|e| AgentreeError::TmuxError(format!("new-window for pane failed: {}", e)))?;
@@ -769,9 +794,10 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
 pub fn focus_right_pane(session: &str) {
     let pane_ids = list_pane_ids(session);
     // Find content pane: first non-indicator pane after the left pane
-    let content = pane_ids.iter().skip(1).find(|id| {
-        get_pane_title(id) != INDICATOR_PANE_TITLE
-    });
+    let content = pane_ids
+        .iter()
+        .skip(1)
+        .find(|id| get_pane_title(id) != INDICATOR_PANE_TITLE);
     if let Some(right_id) = content {
         let _ = Command::new("tmux")
             .args(["select-pane", "-t", right_id])
@@ -788,7 +814,14 @@ pub fn kill_workspace_panes(session: &str, branch: &str) {
     let prefix = format!("agentree-{}", safe);
 
     let pane_infos: Vec<(String, String)> = Command::new("tmux")
-        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_id} #{pane_title}"])
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            session,
+            "-F",
+            "#{pane_id} #{pane_title}",
+        ])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -819,7 +852,10 @@ mod tests {
 
     #[test]
     fn test_agent_session_name_sanitizes_slash() {
-        assert_eq!(agent_session_name("feature/my-auth"), "agentree-feature-my-auth");
+        assert_eq!(
+            agent_session_name("feature/my-auth"),
+            "agentree-feature-my-auth"
+        );
     }
 
     #[test]
@@ -834,11 +870,17 @@ mod tests {
 
     #[test]
     fn test_terminal_session_name() {
-        assert_eq!(terminal_session_name("feature/auth"), "agentree-feature-auth-term");
+        assert_eq!(
+            terminal_session_name("feature/auth"),
+            "agentree-feature-auth-term"
+        );
     }
 
     #[test]
     fn test_editor_session_name() {
-        assert_eq!(editor_session_name("feature/auth"), "agentree-feature-auth-edit");
+        assert_eq!(
+            editor_session_name("feature/auth"),
+            "agentree-feature-auth-edit"
+        );
     }
 }

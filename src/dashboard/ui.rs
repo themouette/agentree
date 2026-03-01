@@ -4,7 +4,7 @@ use crate::dashboard::tmux;
 use crate::dashboard::DASHBOARD_SESSION;
 use crate::error::Result;
 use crossterm::{
-    event::{self, EnableFocusChange, DisableFocusChange, Event, KeyCode, KeyModifiers},
+    event::{self, DisableFocusChange, EnableFocusChange, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -13,7 +13,10 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
     text::{Line, Span, Text},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
+    widgets::{
+        Block, Borders, List, ListItem, ListState, Paragraph, Scrollbar, ScrollbarOrientation,
+        ScrollbarState,
+    },
     Terminal,
 };
 use std::io;
@@ -152,11 +155,13 @@ fn run_event_loop(
                         }
                         // Confirm quit
                         (_, KeyCode::Char('y')) | (_, KeyCode::Char('Y')) if state.quit_pending => {
-                            execute_quit(&state);
+                            execute_quit(state);
                             break;
                         }
                         // Cancel quit
-                        (_, KeyCode::Char('n')) | (_, KeyCode::Char('N')) | (_, KeyCode::Esc) if state.quit_pending => {
+                        (_, KeyCode::Char('n')) | (_, KeyCode::Char('N')) | (_, KeyCode::Esc)
+                            if state.quit_pending =>
+                        {
                             state.quit_pending = false;
                         }
                         // Detach: put dashboard in background, session + TUI stay alive
@@ -309,9 +314,9 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),   // header
-            Constraint::Fill(1),     // list
-            Constraint::Length(1),   // footer (status + hints combined)
+            Constraint::Length(1), // header
+            Constraint::Fill(1),   // list
+            Constraint::Length(1), // footer (status + hints combined)
         ])
         .split(area);
 
@@ -356,9 +361,18 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
             .workspaces
             .iter()
             .map(|ws| {
-                let agent_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::agent_session_name(&ws.branch));
-                let term_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::terminal_session_name(&ws.branch));
-                let edit_running = tmux::pane_exists_in_session(DASHBOARD_SESSION, &tmux::editor_session_name(&ws.branch));
+                let agent_running = tmux::pane_exists_in_session(
+                    DASHBOARD_SESSION,
+                    &tmux::agent_session_name(&ws.branch),
+                );
+                let term_running = tmux::pane_exists_in_session(
+                    DASHBOARD_SESSION,
+                    &tmux::terminal_session_name(&ws.branch),
+                );
+                let edit_running = tmux::pane_exists_in_session(
+                    DASHBOARD_SESSION,
+                    &tmux::editor_session_name(&ws.branch),
+                );
 
                 // Robot icon: green if agent running, DarkGray otherwise
                 let robot_style = if agent_running {
@@ -378,7 +392,11 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                 };
 
                 // Attention icon
-                let attention_str = if ws.attention.is_some() { "\u{2691} " } else { "  " };
+                let attention_str = if ws.attention.is_some() {
+                    "\u{2691} "
+                } else {
+                    "  "
+                };
                 let attention_style = if ws.attention.is_some() {
                     Style::default().fg(Color::Red)
                 } else {
@@ -389,7 +407,8 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                 let branch = truncate_middle(&ws.branch, branch_width);
 
                 // Phase tag: shown after branch if agent_status.phase is present
-                let phase_tag = ws.agent_status
+                let phase_tag = ws
+                    .agent_status
                     .as_ref()
                     .and_then(|s| s.phase.as_ref())
                     .map(|p| {
@@ -493,8 +512,8 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         let rows_per_item: u16 = 2;
         let visible_items = (inner_height / rows_per_item) as usize;
         if state.workspaces.len() > visible_items {
-            let mut scrollbar_state = ScrollbarState::new(state.workspaces.len())
-                .position(state.selected);
+            let mut scrollbar_state =
+                ScrollbarState::new(state.workspaces.len()).position(state.selected);
             f.render_stateful_widget(
                 Scrollbar::new(ScrollbarOrientation::VerticalRight)
                     .begin_symbol(None)
@@ -510,7 +529,12 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         // Quit confirmation takes priority over everything
         Line::from(vec![
             Span::styled("Kill dashboard? ", Style::default().fg(Color::Red)),
-            Span::styled("[y/N]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "[y/N]",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ])
     } else {
         // Check for active status message (errors, etc.) — takes priority over hints
@@ -523,7 +547,10 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         });
 
         if let Some(msg) = active_msg {
-            Line::from(Span::styled(format!(" {} ", msg), Style::default().fg(Color::Red)))
+            Line::from(Span::styled(
+                format!(" {} ", msg),
+                Style::default().fg(Color::Red),
+            ))
         } else {
             Line::from(vec![
                 Span::styled("a", Style::default().fg(Color::Yellow)),
@@ -631,7 +658,7 @@ fn action_clear_attention(state: &mut TuiState, client: &DaemonClient) {
 ///
 /// Call this before breaking out of the event loop. Terminal cleanup is irrelevant
 /// since killing the tmux session destroys the pane.
-fn execute_quit(state: &TuiState) {
+fn execute_quit(state: &mut TuiState) {
     use crate::dashboard::DASHBOARD_SESSION;
 
     // Kill the daemon only if this session started it

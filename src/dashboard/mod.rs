@@ -17,8 +17,9 @@ const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Entry point for `agentree dashboard`
 pub fn execute(tui_mode: bool) -> Result<()> {
-    let sock_path = daemon::socket_path()
-        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
+    let sock_path = daemon::socket_path().ok_or_else(|| {
+        AgentreeError::DaemonError("Could not determine home directory".to_string())
+    })?;
 
     if tui_mode {
         // We are the TUI process running inside the left pane.
@@ -132,8 +133,9 @@ pub fn kill_dashboard() -> Result<()> {
     }
 
     // 2. Stop the daemon via SIGTERM to the PID recorded in the PID file
-    let sock_path = daemon::socket_path()
-        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
+    let sock_path = daemon::socket_path().ok_or_else(|| {
+        AgentreeError::DaemonError("Could not determine home directory".to_string())
+    })?;
 
     let pid_path = daemon::runtime_dir().map(|d| d.join("daemon.pid"));
 
@@ -151,7 +153,9 @@ pub fn kill_dashboard() -> Result<()> {
                 if !try_connect(&sock_path) {
                     eprintln!("Daemon stopped.");
                 } else {
-                    eprintln!("Warning: daemon may still be running. Check: agentree daemon --status");
+                    eprintln!(
+                        "Warning: daemon may still be running. Check: agentree daemon --status"
+                    );
                 }
             } else {
                 eprintln!("No daemon PID found — daemon may not be running.");

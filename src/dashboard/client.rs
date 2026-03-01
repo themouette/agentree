@@ -51,9 +51,7 @@ impl DaemonClient {
         match self.send(&Request::List)? {
             Response::Workspaces(ws) => Ok(ws),
             Response::Err(e) => Err(AgentreeError::Git(format!("Daemon error: {}", e))),
-            _ => Err(AgentreeError::Git(
-                "Unexpected daemon response".to_string(),
-            )),
+            _ => Err(AgentreeError::Git("Unexpected daemon response".to_string())),
         }
     }
 
@@ -64,9 +62,7 @@ impl DaemonClient {
         })? {
             Response::Ok => Ok(()),
             Response::Err(e) => Err(AgentreeError::Git(format!("Daemon error: {}", e))),
-            _ => Err(AgentreeError::Git(
-                "Unexpected daemon response".to_string(),
-            )),
+            _ => Err(AgentreeError::Git("Unexpected daemon response".to_string())),
         }
     }
 }

@@ -30,8 +30,9 @@ pub fn pid_path() -> Option<PathBuf> {
 
 /// Run the daemon (blocking — consumes the calling thread via tokio runtime).
 pub async fn run(repo_root: PathBuf) -> Result<()> {
-    let runtime_dir = runtime_dir()
-        .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
+    let runtime_dir = runtime_dir().ok_or_else(|| {
+        AgentreeError::DaemonError("Could not determine home directory".to_string())
+    })?;
 
     std::fs::create_dir_all(&runtime_dir).map_err(AgentreeError::Io)?;
 
@@ -64,10 +65,7 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
     // Start file watcher
     let (watcher_tx, mut watcher_rx) = tokio::sync::mpsc::channel::<PathBuf>(256);
     let initial_watch_paths = state.get_all_agentree_paths();
-    let paths_to_watch: Vec<PathBuf> = initial_watch_paths
-        .into_iter()
-        .map(|(_, p)| p)
-        .collect();
+    let paths_to_watch: Vec<PathBuf> = initial_watch_paths.into_iter().map(|(_, p)| p).collect();
 
     let raw_watcher = watcher::start_watcher(paths_to_watch, watcher_tx.clone())
         .map_err(|e| AgentreeError::DaemonError(format!("File watcher error: {}", e)))?;
@@ -107,7 +105,11 @@ pub async fn run(repo_root: PathBuf) -> Result<()> {
     let listener = UnixListener::bind(&sock_path)
         .map_err(|e| AgentreeError::DaemonError(format!("Failed to bind socket: {}", e)))?;
 
-    tracing::info!("agentree daemon started. PID: {}. Socket: {}", pid, sock_path.display());
+    tracing::info!(
+        "agentree daemon started. PID: {}. Socket: {}",
+        pid,
+        sock_path.display()
+    );
 
     // Accept loop — exits on signal
     loop {
@@ -202,8 +204,7 @@ fn handle_request(request: Request, state: &DaemonState) -> Response {
 }
 
 fn write_response(stream: &mut impl Write, response: &Response) -> std::io::Result<()> {
-    let json = serde_json::to_string(response)
-        .unwrap_or_else(|_| r#"{"Err":"serialize"}"#.into());
+    let json = serde_json::to_string(response).unwrap_or_else(|_| r#"{"Err":"serialize"}"#.into());
     stream.write_all(json.as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()

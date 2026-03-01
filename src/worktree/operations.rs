@@ -138,11 +138,8 @@ fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
     // 2. Write CLAUDE.md only if no CLAUDE.md exists in worktree root
     let claude_md_path = worktree_path.join("CLAUDE.md");
     if !claude_md_path.exists() {
-        std::fs::write(
-            &claude_md_path,
-            include_str!("../../templates/CLAUDE.md"),
-        )
-        .map_err(AgentreeError::Io)?;
+        std::fs::write(&claude_md_path, include_str!("../../templates/CLAUDE.md"))
+            .map_err(AgentreeError::Io)?;
     }
 
     // 3. Add .agentree/ to git exclude (non-critical, log warning on failure)
@@ -191,14 +188,10 @@ fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
             let rel = rel.trim();
             // rel is relative to gitdir; resolve canonically
             let candidate = gitdir.join(rel);
-            candidate
-                .canonicalize()
-                .map_err(AgentreeError::Io)?
+            candidate.canonicalize().map_err(AgentreeError::Io)?
         } else {
             // No commondir means gitdir IS the common dir (main repo case)
-            gitdir
-                .canonicalize()
-                .map_err(AgentreeError::Io)?
+            gitdir.canonicalize().map_err(AgentreeError::Io)?
         }
     };
 

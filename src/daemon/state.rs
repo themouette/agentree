@@ -118,12 +118,7 @@ impl DaemonState {
             Err(_) => return vec![],
         };
         map.iter()
-            .map(|(branch, info)| {
-                (
-                    branch.clone(),
-                    PathBuf::from(&info.path).join(".agentree"),
-                )
-            })
+            .map(|(branch, info)| (branch.clone(), PathBuf::from(&info.path).join(".agentree")))
             .collect()
     }
 }
@@ -204,12 +199,10 @@ fn get_files_changed(path: &Path) -> u32 {
         .output();
 
     match output {
-        Ok(o) if o.status.success() => {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .count() as u32
-        }
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count() as u32,
         _ => 0,
     }
 }

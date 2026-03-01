@@ -119,7 +119,9 @@ pub enum AgentreeError {
     #[error("tmux is not installed. Install it with: brew install tmux (macOS) or apt install tmux (Linux)")]
     TmuxNotFound,
 
-    #[error("Daemon is not running and could not be started.\nTry running `agentree daemon` manually.")]
+    #[error(
+        "Daemon is not running and could not be started.\nTry running `agentree daemon` manually."
+    )]
     DaemonNotRunning,
 
     #[error("Daemon failed to start. Check logs: {log_path}")]

@@ -68,7 +68,10 @@ pub fn execute(args: DaemonArgs) -> Result<()> {
         match daemon::logging::init_logging(&log_path) {
             Ok(guard) => Some(guard),
             Err(e) => {
-                eprintln!("Warning: could not initialize log file ({}). Continuing without logging.", e);
+                eprintln!(
+                    "Warning: could not initialize log file ({}). Continuing without logging.",
+                    e
+                );
                 None
             }
         }

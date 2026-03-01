@@ -1,7 +1,7 @@
 use rolling_file::{BasicRollingFileAppender, RollingConditionBasic};
+use std::path::Path;
 use tracing_appender::non_blocking;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt};
-use std::path::Path;
 
 /// Keeps the non-blocking writer alive. Must be held for the daemon's entire lifetime.
 /// Dropping this guard flushes and shuts down the background log writer thread.
@@ -21,7 +21,7 @@ pub fn init_logging(log_path: &Path) -> Result<LoggingGuard, String> {
     let file_appender = BasicRollingFileAppender::new(
         log_path,
         RollingConditionBasic::new().max_size(10 * 1024 * 1024), // 10 MB
-        3, // keep 3 rotated files
+        3,                                                       // keep 3 rotated files
     )
     .map_err(|e| format!("Failed to create log file appender: {}", e))?;
 
