@@ -2,6 +2,12 @@ use crate::error::{AgentreeError, Result};
 use std::path::Path;
 use std::process::Command;
 
+/// Fixed column width of the TUI (left) pane in the dashboard layout.
+pub const TUI_PANE_WIDTH: u16 = 44;
+
+/// Percentage of terminal width the TUI pane expands to when focused.
+pub const TUI_PANE_WIDTH_PERCENT: u8 = 50;
+
 /// Check if tmux is installed and available
 pub fn is_available() -> bool {
     which::which("tmux").is_ok()
@@ -153,13 +159,31 @@ pub fn disable_status_bar(session: &str) {
         .output();
 }
 
-/// Bind Ctrl+\ (session-scoped) to return focus to pane 0 of the dashboard session
+/// Bind Ctrl+\ to return focus to pane 0 of the dashboard session.
+///
+/// The binding is technically global (tmux has no session-scoped key bindings),
+/// but it is a silent no-op in other sessions because it checks the current
+/// session name before acting. A `session-closed` hook auto-unbinds the key
+/// when the dashboard session is killed.
 pub fn bind_key_return_to_dashboard(session: &str) {
     let window = first_window_index(session);
     let pane = format!("{}:{}.0", session, window);
-    // Bind as a global key (no prefix) for simplicity
+    let check_and_select = format!(
+        "[ \"$(tmux display-message -p '#S')\" = '{}' ] && tmux select-pane -t '{}'",
+        session, pane
+    );
     let _ = Command::new("tmux")
-        .args(["bind-key", "-n", r"C-\", "select-pane", "-t", &pane])
+        .args(["bind-key", "-n", r"C-\", "run-shell", &check_and_select])
+        .output();
+    // Auto-unbind when the dashboard session closes
+    let _ = Command::new("tmux")
+        .args([
+            "set-hook",
+            "-t",
+            session,
+            "session-closed",
+            r"unbind-key -n C-\",
+        ])
         .output();
 }
 
@@ -207,85 +231,7 @@ fn list_pane_ids(session: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Run a command in the right pane of the dashboard session.
-///
-/// Uses pane IDs (not indices) so it works regardless of `pane-base-index`.
-/// If the right pane exists (≥2 panes), respawns it with the new command.
-/// If the user closed the right pane, recreates it by splitting $TMUX_PANE
-/// (our own pane) and resizes the left pane back to 44 columns.
-pub fn run_in_right_pane(session: &str, cmd: &str) -> Result<()> {
-    let pane_ids = list_pane_ids(session);
-
-    if pane_ids.len() >= 2 {
-        // Right pane exists — respawn it using its pane ID directly
-        let right_id = &pane_ids[1];
-        let out = Command::new("tmux")
-            .args(["respawn-pane", "-k", "-t", right_id, cmd])
-            .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("respawn-pane failed: {}", e)))?;
-        if !out.status.success() {
-            return Err(AgentreeError::TmuxError(format!(
-                "tmux respawn-pane failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
-        }
-        Ok(())
-    } else {
-        // Right pane was closed — recreate it.
-        // Split $TMUX_PANE (our own pane ID) so we always split the correct pane
-        // regardless of pane-base-index or how tmux numbers things.
-        let split_target = std::env::var("TMUX_PANE").unwrap_or_else(|_| {
-            // Fallback: use first pane ID or window target
-            pane_ids
-                .first()
-                .cloned()
-                .unwrap_or_else(|| format!("{}:{}", session, first_window_index(session)))
-        });
-
-        let out = Command::new("tmux")
-            .args(["split-window", "-h", "-d", "-t", &split_target])
-            .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("split-window failed: {}", e)))?;
-        if !out.status.success() {
-            return Err(AgentreeError::TmuxError(format!(
-                "tmux split-window failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
-        }
-
-        // Re-query panes to get the new right pane ID
-        let new_ids = list_pane_ids(session);
-        if new_ids.len() < 2 {
-            return Err(AgentreeError::TmuxError(
-                "split-window did not create a right pane".to_string(),
-            ));
-        }
-
-        let right_id = &new_ids[1];
-        let left_id = &new_ids[0];
-
-        // Run the desired command in the new right pane
-        let out = Command::new("tmux")
-            .args(["respawn-pane", "-k", "-t", right_id, cmd])
-            .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("respawn-pane failed: {}", e)))?;
-        if !out.status.success() {
-            return Err(AgentreeError::TmuxError(format!(
-                "tmux respawn-pane (new pane) failed: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            )));
-        }
-
-        // Restore the left pane to its 44-column width (split halved it)
-        let _ = Command::new("tmux")
-            .args(["resize-pane", "-x", "44", "-t", left_id])
-            .output();
-
-        Ok(())
-    }
-}
-
-/// Resize the calling pane to 44 columns using $TMUX_PANE.
+/// Resize the calling pane to TUI_PANE_WIDTH columns using $TMUX_PANE.
 ///
 /// Only call this when the right pane (pane 1) exists. When only one pane
 /// is present, resize-pane shrinks the entire tmux window, leaving no space
@@ -293,7 +239,13 @@ pub fn run_in_right_pane(session: &str, cmd: &str) -> Result<()> {
 pub fn resize_self_to_44_cols() {
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {
         let _ = Command::new("tmux")
-            .args(["resize-pane", "-x", "44", "-t", &pane_id])
+            .args([
+                "resize-pane",
+                "-x",
+                &TUI_PANE_WIDTH.to_string(),
+                "-t",
+                &pane_id,
+            ])
             .output();
     }
 }
@@ -303,26 +255,49 @@ pub fn right_pane_exists(session: &str) -> bool {
     list_pane_ids(session).len() >= 2
 }
 
-/// Returns true if pane 0 in the given session's window 0 has its process exited.
+/// Check whether pane at `index` in the session's main window has its process exited.
 ///
-/// Uses `tmux list-panes -F '#{pane_dead}'` which outputs "1" for dead panes.
-///
-/// Assumes pane-base-index 0 (tmux default). Users with pane-base-index 1 will need to adjust.
-pub fn is_tui_pane_dead(session: &str) -> bool {
+/// For `index > 0`, returns `true` when fewer panes than `index + 1` exist
+/// (missing pane is treated as dead). For `index == 0`, returns `false` when
+/// no panes exist (avoids spurious dead detection on the TUI pane).
+fn is_pane_dead_at_index(session: &str, index: usize) -> bool {
     let window = first_window_index(session);
     let target = format!("{}:{}", session, window);
-    let output = Command::new("tmux")
+    Command::new("tmux")
         .args(["list-panes", "-t", &target, "-F", "#{pane_dead}"])
-        .output();
-    output
+        .output()
         .map(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .lines()
-                .next() // pane 0 is the first line
-                .map(|l| l.trim() == "1")
-                .unwrap_or(false)
+            let output = String::from_utf8_lossy(&o.stdout);
+            let mut lines = output.lines();
+            // Skip panes before the requested index
+            for _ in 0..index {
+                if lines.next().is_none() {
+                    // Not enough panes — for index > 0, treat as dead
+                    return index > 0;
+                }
+            }
+            match lines.next() {
+                Some(l) => l.trim() == "1",
+                // No pane at this index
+                None => index > 0,
+            }
         })
         .unwrap_or(false)
+}
+
+/// Returns true if pane 0 in the given session's window has its process exited.
+///
+/// Uses `tmux list-panes -F '#{pane_dead}'` which outputs "1" for dead panes.
+pub fn is_tui_pane_dead(session: &str) -> bool {
+    is_pane_dead_at_index(session, 0)
+}
+
+/// Returns true if the right content pane (pane 1) has exited (pane_dead = 1).
+///
+/// Returns `true` when fewer than 2 panes exist (no content pane = dead).
+/// Returns `false` on any error (safe default — avoid spurious respawn).
+pub fn is_content_pane_dead(session: &str) -> bool {
+    is_pane_dead_at_index(session, 1)
 }
 
 /// Ensure a named tmux session exists for an agent in the given worktree.
@@ -507,30 +482,6 @@ pub fn show_welcome_panel(session: &str) {
     set_right_pane_display_title(session, "Help");
 }
 
-/// Returns true if the right content pane has exited (pane_dead = 1).
-///
-/// Returns false on any error (safe default — avoid spurious respawn).
-pub fn is_content_pane_dead(session: &str) -> bool {
-    let window = first_window_index(session);
-    let target = format!("{}:{}", session, window);
-    Command::new("tmux")
-        .args(["list-panes", "-t", &target, "-F", "#{pane_dead}"])
-        .output()
-        .map(|o| {
-            let output = String::from_utf8_lossy(&o.stdout);
-            let mut lines = output.lines();
-            // Skip the left TUI pane (first in list).
-            lines.next();
-            match lines.next() {
-                // Right pane exists and its process has exited (remain-on-exit).
-                Some(l) => l.trim() == "1",
-                // No second pane at all — it was closed/removed when the process exited.
-                None => true,
-            }
-        })
-        .unwrap_or(false)
-}
-
 /// Resize the calling pane to a percentage of the terminal width.
 ///
 /// Uses $TMUX_PANE to identify the calling pane. Only call when a right pane exists.
@@ -548,35 +499,11 @@ pub fn resize_self_to_percent(percent: u8) {
     }
 }
 
-const STASH_WINDOW: &str = "stash";
-
-/// Ensure the stash window exists in the dashboard session.
-///
-/// The stash window holds inactive action panes (agent, terminal, editor) while
-/// only one is shown at a time in the main window's right slot.
-pub fn ensure_stash_window(session: &str) -> Result<()> {
-    let out = Command::new("tmux")
-        .args(["list-windows", "-t", session, "-F", "#{window_name}"])
-        .output()
-        .map_err(|e| AgentreeError::TmuxError(format!("list-windows failed: {}", e)))?;
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    if stdout.lines().any(|l| l.trim() == STASH_WINDOW) {
-        return Ok(());
-    }
-    let out = Command::new("tmux")
-        .args(["new-window", "-d", "-n", STASH_WINDOW, "-t", session])
-        .output()
-        .map_err(|e| AgentreeError::TmuxError(format!("new-window stash failed: {}", e)))?;
-    if !out.status.success() {
-        return Err(AgentreeError::TmuxError(format!(
-            "tmux new-window (stash) failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
-    }
-    Ok(())
-}
-
 /// Set the title of a tmux pane by its pane ID (e.g. "%3").
+///
+/// Sets both the terminal title (`select-pane -T`) and the persistent
+/// `@agentree_title` user option so `find_pane_in_session` can locate it
+/// reliably even when an agent overwrites the terminal title.
 fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
     let out = Command::new("tmux")
         .args(["select-pane", "-t", pane_id, "-T", title])
@@ -588,13 +515,17 @@ fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
+    // Also set the persistent user option used by find_pane_in_session
+    let _ = Command::new("tmux")
+        .args(["set-option", "-p", "-t", pane_id, "@agentree_title", title])
+        .output();
     Ok(())
 }
 
-/// Get the title of a specific pane by its pane ID.
+/// Get the agentree title of a specific pane by its pane ID.
 fn get_pane_title(pane_id: &str) -> String {
     Command::new("tmux")
-        .args(["display-message", "-t", pane_id, "-p", "#{pane_title}"])
+        .args(["display-message", "-t", pane_id, "-p", "#{@agentree_title}"])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -602,7 +533,7 @@ fn get_pane_title(pane_id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Find a pane anywhere in the session by its title. Returns the pane ID if found.
+/// Find a pane anywhere in the session by its agentree title. Returns the pane ID if found.
 fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
     let out = Command::new("tmux")
         .args([
@@ -611,7 +542,7 @@ fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
             "-t",
             session,
             "-F",
-            "#{pane_id} #{pane_title}",
+            "#{pane_id} #{@agentree_title}",
         ])
         .output()
         .ok()?;
@@ -627,12 +558,19 @@ fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
     None
 }
 
-/// Check whether a pane with the given title exists anywhere in the session.
+/// Check whether a pane with the given agentree title exists anywhere in the session.
 ///
 /// Used for session icon indicators in the workspace list.
 pub fn pane_exists_in_session(session: &str, title: &str) -> bool {
     Command::new("tmux")
-        .args(["list-panes", "-s", "-t", session, "-F", "#{pane_title}"])
+        .args([
+            "list-panes",
+            "-s",
+            "-t",
+            session,
+            "-F",
+            "#{@agentree_title}",
+        ])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -727,12 +665,18 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         let _ = set_pane_title(&new_pane_id, title);
     }
 
-    // 6. Restore the TUI pane to its 44-column width
+    // 4. Restore the TUI pane to its fixed column width
     let _ = Command::new("tmux")
-        .args(["resize-pane", "-x", "44", "-t", &left_id])
+        .args([
+            "resize-pane",
+            "-x",
+            &TUI_PANE_WIDTH.to_string(),
+            "-t",
+            &left_id,
+        ])
         .output();
 
-    // 7. Give keyboard focus to the right pane
+    // 5. Give keyboard focus to the right pane
     focus_right_pane(session);
 
     Ok(())
@@ -763,7 +707,7 @@ pub fn kill_workspace_panes(session: &str, branch: &str) {
             "-t",
             session,
             "-F",
-            "#{pane_id} #{pane_title}",
+            "#{pane_id} #{@agentree_title}",
         ])
         .output()
         .ok()
