@@ -25,7 +25,7 @@ pub fn execute(tui_mode: bool) -> Result<()> {
         // We are the TUI process running inside the left pane.
         // Check if this session started the daemon (communicated via env var from parent).
         let started_daemon = std::env::var("AGENTREE_STARTED_DAEMON").is_ok();
-        let client = DaemonClient::connect(&sock_path)?;
+        let client = DaemonClient::new(&sock_path)?;
         return ui::run_tui(client, started_daemon);
     }
 
@@ -66,12 +66,6 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     } else {
         format!("{} dashboard --tui", agentree_bin)
     };
-
-    // DMN-04: handle_request() in daemon/mod.rs: Request::List => Response::Workspaces(state.snapshot())
-    // DMN-05: watcher.rs watches .agentree/ dir; fires on status.json changes → state.update_workspace()
-    // DMN-06: same watcher fires on attention.md changes → state.update_workspace() → read_attention()
-    // DMN-07: daemon/mod.rs lines 79-93: tokio::time::interval(30s) loop → state.refresh_all()
-    // All four are already implemented. No code changes needed for DMN-04..07.
 
     if tmux_util::session_exists(DASHBOARD_SESSION) {
         // Session exists — check if TUI pane (pane 0) is dead and relaunch if needed
