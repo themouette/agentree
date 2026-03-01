@@ -1,5 +1,6 @@
 use crate::error::{AgentreeError, Result};
 use once_cell::sync::Lazy;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -224,19 +225,30 @@ fn run_git_command_timeout(
         .map_err(|e| AgentreeError::Git(format!("Failed to wait for git command: {}", e)))?
     {
         Some(status) => {
-            let output = child
-                .wait_with_output()
-                .map_err(|e| AgentreeError::Git(format!("Failed to read git output: {}", e)))?;
+            let stdout = {
+                let mut buf = Vec::new();
+                if let Some(mut h) = child.stdout.take() {
+                    let _ = h.read_to_end(&mut buf);
+                }
+                buf
+            };
+            let stderr = {
+                let mut buf = Vec::new();
+                if let Some(mut h) = child.stderr.take() {
+                    let _ = h.read_to_end(&mut buf);
+                }
+                buf
+            };
 
             if !status.success() {
                 return Err(AgentreeError::Git(format!(
                     "git {} failed: {}",
                     args[0],
-                    String::from_utf8_lossy(&output.stderr)
+                    String::from_utf8_lossy(&stderr)
                 )));
             }
 
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            Ok(String::from_utf8_lossy(&stdout).trim().to_string())
         }
         None => {
             // Timeout occurred, kill the process
@@ -297,13 +309,15 @@ pub fn run_git_query(args: &[&str]) -> Result<Option<String>> {
                 return Ok(None);
             }
 
-            let output = child
-                .wait_with_output()
-                .map_err(|e| AgentreeError::Git(format!("Failed to read git output: {}", e)))?;
+            let stdout = {
+                let mut buf = Vec::new();
+                if let Some(mut h) = child.stdout.take() {
+                    let _ = h.read_to_end(&mut buf);
+                }
+                buf
+            };
 
-            Ok(Some(
-                String::from_utf8_lossy(&output.stdout).trim().to_string(),
-            ))
+            Ok(Some(String::from_utf8_lossy(&stdout).trim().to_string()))
         }
         None => {
             // Timeout occurred, kill the process
@@ -347,11 +361,26 @@ pub fn run_git_best_effort(args: &[&str]) -> Result<std::process::Output> {
         .wait_timeout(timeout)
         .map_err(|e| AgentreeError::Git(format!("Failed to wait for git command: {}", e)))?
     {
-        Some(_) => {
-            let output = child
-                .wait_with_output()
-                .map_err(|e| AgentreeError::Git(format!("Failed to read git output: {}", e)))?;
-            Ok(output)
+        Some(status) => {
+            let stdout = {
+                let mut buf = Vec::new();
+                if let Some(mut h) = child.stdout.take() {
+                    let _ = h.read_to_end(&mut buf);
+                }
+                buf
+            };
+            let stderr = {
+                let mut buf = Vec::new();
+                if let Some(mut h) = child.stderr.take() {
+                    let _ = h.read_to_end(&mut buf);
+                }
+                buf
+            };
+            Ok(std::process::Output {
+                status,
+                stdout,
+                stderr,
+            })
         }
         None => {
             // Timeout occurred, kill the process
@@ -756,18 +785,5 @@ mod tests {
         // Since GIT_TIMEOUT is a Lazy static, we can't easily reset it in tests
         // but we can verify the default is reasonable
         assert!(GIT_TIMEOUT.as_secs() >= 30);
-    }
-
-    #[test]
-    fn test_git_timeout_configurable() {
-        // This test documents that AGENTREE_GIT_TIMEOUT should be set before
-        // the first access to GIT_TIMEOUT for it to take effect
-        // In real usage, users would set the env var before running agentree
-        use std::env;
-
-        // Document the environment variable for users
-        assert!(
-            env::var("AGENTREE_GIT_TIMEOUT").is_ok() || env::var("AGENTREE_GIT_TIMEOUT").is_err()
-        );
     }
 }
