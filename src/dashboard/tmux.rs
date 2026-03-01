@@ -368,8 +368,8 @@ pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> 
 /// Enable pane border status for the dashboard window.
 ///
 /// Sets `pane-border-status top` so each pane shows a 1-row title bar, and
-/// `pane-border-format` to display the per-pane `@agentree_title` user option.
-/// Also initialises the left pane title to "agentree".
+/// `pane-border-format` to display the per-pane `@agentree_display` user option.
+/// Also initialises the left pane titles to "agentree".
 ///
 /// Call this once after split_horizontal() during session creation.
 pub fn setup_pane_border_status(session: &str) {
@@ -384,10 +384,10 @@ pub fn setup_pane_border_status(session: &str) {
             "-t",
             &target,
             "pane-border-format",
-            " #{@agentree_title}",
+            " #{@agentree_display}",
         ])
         .output();
-    // Set left pane display title to "agentree"
+    // Set left pane display titles to "agentree"
     let pane_ids = list_pane_ids(session);
     if let Some(left_id) = pane_ids.first() {
         let _ = Command::new("tmux")
@@ -400,13 +400,24 @@ pub fn setup_pane_border_status(session: &str) {
                 "agentree",
             ])
             .output();
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-p",
+                "-t",
+                left_id,
+                "@agentree_display",
+                "agentree",
+            ])
+            .output();
     }
 }
 
-/// Update the display title shown in the right pane's border.
+/// Update the display label shown in the right pane's border.
 ///
-/// Uses the per-pane tmux user option `@agentree_title` so the pane's
-/// identity title (used by find_pane_in_session) is not affected.
+/// Sets `@agentree_display` — a separate option from `@agentree_title`.
+/// `@agentree_title` holds the stable identity used by `find_pane_in_session`
+/// to park and restore panes; it must never be overwritten here.
 ///
 /// Safe to call if no right pane exists — silently does nothing.
 pub fn set_right_pane_display_title(session: &str, display: &str) {
@@ -418,7 +429,7 @@ pub fn set_right_pane_display_title(session: &str, display: &str) {
                 "-p",
                 "-t",
                 right_id,
-                "@agentree_title",
+                "@agentree_display",
                 display,
             ])
             .output();
@@ -515,9 +526,15 @@ fn set_pane_title(pane_id: &str, title: &str) -> Result<()> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    // Also set the persistent user option used by find_pane_in_session
+    // Set the persistent identity option used by find_pane_in_session
     let _ = Command::new("tmux")
         .args(["set-option", "-p", "-t", pane_id, "@agentree_title", title])
+        .output();
+    // Initialise the display option (shown in pane border) to the identity.
+    // set_right_pane_display_title may update this to a friendlier label later,
+    // but it must never touch @agentree_title.
+    let _ = Command::new("tmux")
+        .args(["set-option", "-p", "-t", pane_id, "@agentree_display", title])
         .output();
     Ok(())
 }
@@ -531,6 +548,15 @@ fn get_pane_title(pane_id: &str) -> String {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_string())
         .unwrap_or_default()
+}
+
+/// Check whether a specific pane (by ID) has its process exited.
+fn is_pane_dead_by_id(pane_id: &str) -> bool {
+    Command::new("tmux")
+        .args(["display-message", "-p", "-t", pane_id, "#{pane_dead}"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "1")
+        .unwrap_or(false)
 }
 
 /// Find a pane anywhere in the session by its agentree title. Returns the pane ID if found.
@@ -558,7 +584,8 @@ fn find_pane_in_session(session: &str, title: &str) -> Option<String> {
     None
 }
 
-/// Check whether a pane with the given agentree title exists anywhere in the session.
+/// Check whether a pane with the given agentree title exists anywhere in the session
+/// and its process is still alive (not dead).
 ///
 /// Used for session icon indicators in the workspace list.
 pub fn pane_exists_in_session(session: &str, title: &str) -> bool {
@@ -569,12 +596,19 @@ pub fn pane_exists_in_session(session: &str, title: &str) -> bool {
             "-t",
             session,
             "-F",
-            "#{@agentree_title}",
+            "#{pane_dead} #{@agentree_title}",
         ])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.lines().any(|l| l.trim() == title))
+        .map(|s| {
+            s.lines().any(|l| {
+                let mut parts = l.splitn(2, ' ');
+                let dead = parts.next().map(|s| s.trim() == "1").unwrap_or(true);
+                let pane_title = parts.next().map(|s| s.trim()).unwrap_or("");
+                !dead && pane_title == title
+            })
+        })
         .unwrap_or(false)
 }
 
@@ -622,7 +656,19 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
     }
 
     // 3. Restore a parked pane or create a fresh one in the main window.
-    if let Some(existing_id) = find_pane_in_session(session, title) {
+    //    If the found pane's process has exited, kill it and create a new one.
+    let alive_pane_id = find_pane_in_session(session, title).and_then(|existing_id| {
+        if is_pane_dead_by_id(&existing_id) {
+            let _ = Command::new("tmux")
+                .args(["kill-pane", "-t", &existing_id])
+                .output();
+            None
+        } else {
+            Some(existing_id)
+        }
+    });
+
+    if let Some(existing_id) = alive_pane_id {
         // Bring back the parked pane via join-pane
         let out = Command::new("tmux")
             .args(["join-pane", "-h", "-s", &existing_id, "-t", &left_id])
