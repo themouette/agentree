@@ -38,6 +38,12 @@ struct TuiState {
     frame: u64,
     /// Ephemeral error message shown in the status bar. Auto-clears after 3 seconds.
     status_message: Option<(String, std::time::Instant)>,
+    /// True if this TUI session started the daemon (and should kill it on quit).
+    started_daemon: bool,
+    /// True when the footer shows "Kill dashboard? [y/N]" confirmation.
+    quit_pending: bool,
+    /// Branch of the last-actioned workspace (used by indicator pane).
+    active_workspace: Option<String>,
 }
 
 impl TuiState {
@@ -50,6 +56,9 @@ impl TuiState {
             startup: TuiStartupState::Connecting,
             frame: 0,
             status_message: None,
+            started_daemon: false,
+            quit_pending: false,
+            active_workspace: None,
         }
     }
 
@@ -75,7 +84,7 @@ impl TuiState {
 }
 
 /// Run the ratatui TUI in the left pane of the dashboard
-pub fn run_tui(client: DaemonClient) -> Result<()> {
+pub fn run_tui(client: DaemonClient, started_daemon: bool) -> Result<()> {
     enable_raw_mode().map_err(crate::error::AgentreeError::Io)?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableFocusChange)
@@ -86,6 +95,7 @@ pub fn run_tui(client: DaemonClient) -> Result<()> {
 
     // Start in Connecting state; transition to Connected on first successful list
     let mut state = TuiState::new();
+    state.started_daemon = started_daemon;
 
     let result = run_event_loop(&mut terminal, &mut state, &client);
 
@@ -131,11 +141,27 @@ fn run_event_loop(
             match event::read().map_err(crate::error::AgentreeError::Io)? {
                 Event::Key(key) => {
                     match (key.modifiers, key.code) {
-                        // Detach: put dashboard in background, session + TUI stay alive
+                        // Quit: first press shows confirmation footer, second q cancels
                         (_, KeyCode::Char('q')) => {
-                            let _ = std::process::Command::new("tmux")
-                                .args(["detach-client"])
-                                .status();
+                            if !state.quit_pending {
+                                state.quit_pending = true;
+                            } else {
+                                // Second q press — cancel (treat as 'n')
+                                state.quit_pending = false;
+                            }
+                        }
+                        // Confirm quit
+                        (_, KeyCode::Char('y')) | (_, KeyCode::Char('Y')) if state.quit_pending => {
+                            execute_quit(&state);
+                            break;
+                        }
+                        // Cancel quit
+                        (_, KeyCode::Char('n')) | (_, KeyCode::Char('N')) | (_, KeyCode::Esc) if state.quit_pending => {
+                            state.quit_pending = false;
+                        }
+                        // Detach: put dashboard in background, session + TUI stay alive
+                        (_, KeyCode::Char('d')) => {
+                            execute_detach();
                             // Don't break — TUI keeps running; `agentree dashboard` reattaches
                         }
                         // Force-quit: actually exit the TUI process
@@ -200,6 +226,7 @@ fn run_event_loop(
                 Err(_) => {
                     if state.startup == TuiStartupState::Connected {
                         state.startup = TuiStartupState::ConnectionLost;
+                        state.quit_pending = false; // cancel any pending quit on connection loss
                     }
                 }
             }
@@ -459,30 +486,45 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         }
     }
 
-    // ── footer: status message (left) + key hints (right, abbreviated) ──
-    let status_part = match &state.status_message {
-        Some((msg, shown_at)) if shown_at.elapsed() < std::time::Duration::from_secs(3) => {
-            Span::styled(format!(" {} ", msg), Style::default().fg(Color::Red))
-        }
-        _ => Span::raw(" "),
-    };
+    // ── footer: quit confirmation or status message or key hints ──
+    let footer_line = if state.quit_pending {
+        // Quit confirmation takes priority over everything
+        Line::from(vec![
+            Span::styled("Kill dashboard? ", Style::default().fg(Color::Red)),
+            Span::styled("[y/N]", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        ])
+    } else {
+        // Check for active status message (errors, etc.) — takes priority over hints
+        let active_msg = state.status_message.as_ref().and_then(|(msg, shown_at)| {
+            if shown_at.elapsed() < std::time::Duration::from_secs(3) {
+                Some(msg.as_str())
+            } else {
+                None
+            }
+        });
 
-    let hints = Line::from(vec![
-        status_part,
-        Span::styled("j/k", Style::default().fg(Color::Yellow)),
-        Span::raw(" nav  "),
-        Span::styled("a", Style::default().fg(Color::Yellow)),
-        Span::raw(" agent  "),
-        Span::styled("t", Style::default().fg(Color::Yellow)),
-        Span::raw(" term  "),
-        Span::styled("e", Style::default().fg(Color::Yellow)),
-        Span::raw(" edit  "),
-        Span::styled("c", Style::default().fg(Color::Yellow)),
-        Span::raw(" clear  "),
-        Span::styled("q", Style::default().fg(Color::Yellow)),
-        Span::raw(" detach"),
-    ]);
-    let footer = Paragraph::new(hints).style(Style::default().fg(Color::DarkGray));
+        if let Some(msg) = active_msg {
+            Line::from(Span::styled(format!(" {} ", msg), Style::default().fg(Color::Red)))
+        } else {
+            Line::from(vec![
+                Span::styled("a", Style::default().fg(Color::Yellow)),
+                Span::raw(" agent  "),
+                Span::styled("t", Style::default().fg(Color::Yellow)),
+                Span::raw(" term  "),
+                Span::styled("e", Style::default().fg(Color::Yellow)),
+                Span::raw(" edit  "),
+                Span::styled("c", Style::default().fg(Color::Yellow)),
+                Span::raw(" clear  "),
+                Span::styled("d", Style::default().fg(Color::Yellow)),
+                Span::raw(" detach  "),
+                Span::styled("q", Style::default().fg(Color::Yellow)),
+                Span::raw(" quit  "),
+                Span::styled("?", Style::default().fg(Color::Yellow)),
+                Span::raw(" help"),
+            ])
+        }
+    };
+    let footer = Paragraph::new(footer_line).style(Style::default().fg(Color::DarkGray));
     f.render_widget(footer, inner[2]);
 }
 
@@ -546,6 +588,44 @@ fn action_clear_attention(state: &mut TuiState, client: &DaemonClient) {
             let _ = client.clear_attention(&branch);
         }
     }
+}
+
+/// Kill the dashboard tmux session (and the daemon if this session started it).
+///
+/// Call this before breaking out of the event loop. Terminal cleanup is irrelevant
+/// since killing the tmux session destroys the pane.
+fn execute_quit(state: &TuiState) {
+    use crate::dashboard::DASHBOARD_SESSION;
+
+    // Kill the daemon only if this session started it
+    if state.started_daemon {
+        if let Some(pid_path) = crate::daemon::runtime_dir().map(|d| d.join("daemon.pid")) {
+            if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+                if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                    #[cfg(unix)]
+                    let _ = std::process::Command::new("kill")
+                        .args(["-TERM", &pid.to_string()])
+                        .status();
+                }
+            }
+        }
+    }
+
+    // Kill the tmux session — this kills the TUI process itself
+    let _ = std::process::Command::new("tmux")
+        .args(["kill-session", "-t", DASHBOARD_SESSION])
+        .status();
+}
+
+/// Detach from the tmux session without killing the dashboard.
+///
+/// The session and TUI remain alive in the background.
+/// `agentree dashboard` will reattach on next invocation.
+fn execute_detach() {
+    eprintln!("Dashboard running in background. Re-attach: agentree dashboard");
+    let _ = std::process::Command::new("tmux")
+        .args(["detach-client"])
+        .status();
 }
 
 // ---------------------------------------------------------------------------
