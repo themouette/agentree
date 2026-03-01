@@ -650,7 +650,12 @@ fn open_pane_for_workspace(
 fn action_agent(state: &mut TuiState) {
     if let Some(ws) = state.selected_workspace().cloned() {
         let title = tmux::agent_session_name(&ws.branch);
-        let cmd = ws.agent_bin.as_deref().unwrap_or("claude").to_string();
+        // Run `agentree agent <branch>` so backend and agent config are respected,
+        // exactly as the CLI command does. Fall back to "agentree" if current_exe fails.
+        let agentree = std::env::current_exe()
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "agentree".to_string());
+        let cmd = format!("{} agent {}", agentree, shell_quote(&ws.branch));
         let cwd = std::path::PathBuf::from(&ws.path);
         open_pane_for_workspace(state, title, cmd, cwd, ws.branch.clone());
     }
