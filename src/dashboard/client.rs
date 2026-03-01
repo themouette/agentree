@@ -9,7 +9,7 @@ pub struct DaemonClient {
 }
 
 impl DaemonClient {
-    pub fn connect(sock_path: &Path) -> Result<Self> {
+    pub fn new(sock_path: &Path) -> Result<Self> {
         // Just store the path; we open a new connection per request (one-shot protocol)
         Ok(DaemonClient {
             sock_path: sock_path.to_path_buf(),
@@ -22,8 +22,9 @@ impl DaemonClient {
         {
             use std::os::unix::net::UnixStream;
 
-            let mut stream = UnixStream::connect(&self.sock_path)
-                .map_err(|e| AgentreeError::Git(format!("Cannot connect to daemon: {}", e)))?;
+            let mut stream = UnixStream::connect(&self.sock_path).map_err(|e| {
+                AgentreeError::DaemonError(format!("Cannot connect to daemon: {}", e))
+            })?;
 
             let json = serde_json::to_string(request).map_err(AgentreeError::Json)?;
             stream
@@ -36,7 +37,9 @@ impl DaemonClient {
             let line = reader
                 .lines()
                 .next()
-                .ok_or_else(|| AgentreeError::Git("Daemon sent empty response".to_string()))?
+                .ok_or_else(|| {
+                    AgentreeError::DaemonError("Daemon sent empty response".to_string())
+                })?
                 .map_err(AgentreeError::Io)?;
 
             serde_json::from_str(&line).map_err(AgentreeError::Json)
@@ -50,8 +53,10 @@ impl DaemonClient {
     pub fn list_workspaces(&self) -> Result<Vec<WorkspaceInfo>> {
         match self.send(&Request::List)? {
             Response::Workspaces(ws) => Ok(ws),
-            Response::Err(e) => Err(AgentreeError::Git(format!("Daemon error: {}", e))),
-            _ => Err(AgentreeError::Git("Unexpected daemon response".to_string())),
+            Response::Err(e) => Err(AgentreeError::DaemonError(format!("Daemon error: {}", e))),
+            _ => Err(AgentreeError::DaemonError(
+                "Unexpected daemon response".to_string(),
+            )),
         }
     }
 
@@ -61,8 +66,10 @@ impl DaemonClient {
             branch: branch.to_string(),
         })? {
             Response::Ok => Ok(()),
-            Response::Err(e) => Err(AgentreeError::Git(format!("Daemon error: {}", e))),
-            _ => Err(AgentreeError::Git("Unexpected daemon response".to_string())),
+            Response::Err(e) => Err(AgentreeError::DaemonError(format!("Daemon error: {}", e))),
+            _ => Err(AgentreeError::DaemonError(
+                "Unexpected daemon response".to_string(),
+            )),
         }
     }
 }
