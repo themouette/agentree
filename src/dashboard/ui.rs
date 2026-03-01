@@ -209,11 +209,12 @@ fn run_event_loop(
                     }
                 }
                 Event::Resize(_, _) => {
-                    // Restore 44-col width only when the right pane exists.
+                    // Restore 44-col width only when unfocused and the right pane exists.
+                    // When focused, the pane should stay at 50% — don't undo FocusGained.
                     // When pane 1 just closed, we are the only pane — resizing
                     // would shrink the entire tmux window to 44 cols, leaving no
                     // space when the right pane is recreated.
-                    if tmux::right_pane_exists(DASHBOARD_SESSION) {
+                    if !state.focused && tmux::right_pane_exists(DASHBOARD_SESSION) {
                         tmux::resize_self_to_44_cols();
                     }
                 }
@@ -310,12 +311,13 @@ fn render_connection_lost(f: &mut ratatui::Frame, area: ratatui::layout::Rect) {
 }
 
 fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, state: &TuiState) {
-    // Split into: header line + list area + footer (status + hints combined)
+    // Split into: header line + list area + active indicator + footer
     let inner = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // header
             Constraint::Fill(1),   // list
+            Constraint::Length(1), // active workspace indicator
             Constraint::Length(1), // footer (status + hints combined)
         ])
         .split(area);
@@ -524,6 +526,19 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         }
     }
 
+    // ── active workspace indicator ──
+    let active_line = match &state.active_workspace {
+        Some(branch) => Line::from(vec![
+            Span::styled("Active: ", Style::default().fg(Color::DarkGray)),
+            Span::styled(branch.clone(), Style::default().fg(Color::Cyan)),
+        ]),
+        None => Line::from(Span::styled(
+            "No active workspace",
+            Style::default().fg(Color::DarkGray),
+        )),
+    };
+    f.render_widget(Paragraph::new(active_line), inner[2]);
+
     // ── footer: quit confirmation or status message or key hints ──
     let footer_line = if state.quit_pending {
         // Quit confirmation takes priority over everything
@@ -571,7 +586,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         }
     };
     let footer = Paragraph::new(footer_line).style(Style::default().fg(Color::DarkGray));
-    f.render_widget(footer, inner[2]);
+    f.render_widget(footer, inner[3]);
 }
 
 // ---------------------------------------------------------------------------
@@ -585,8 +600,11 @@ fn action_agent(state: &mut TuiState) {
         let agent_cmd = ws.agent_bin.as_deref().unwrap_or("claude");
         match tmux::show_pane(DASHBOARD_SESSION, &title, agent_cmd, worktree_path) {
             Ok(()) => {
-                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
                 state.active_workspace = Some(ws.branch.clone());
+                tmux::set_right_pane_display_title(
+                    DASHBOARD_SESSION,
+                    &format!("Active: {}", ws.branch),
+                );
             }
             Err(e) => {
                 state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
@@ -602,8 +620,11 @@ fn action_terminal(state: &mut TuiState) {
         let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
         match tmux::show_pane(DASHBOARD_SESSION, &title, &shell, worktree_path) {
             Ok(()) => {
-                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
                 state.active_workspace = Some(ws.branch.clone());
+                tmux::set_right_pane_display_title(
+                    DASHBOARD_SESSION,
+                    &format!("Active: {}", ws.branch),
+                );
             }
             Err(e) => {
                 state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));
@@ -632,8 +653,11 @@ fn action_editor(state: &mut TuiState) {
         let edit_cmd = format!("{} .", shell_quote(&editor));
         match tmux::show_pane(DASHBOARD_SESSION, &title, &edit_cmd, worktree_path) {
             Ok(()) => {
-                tmux::update_indicator(DASHBOARD_SESSION, &ws.branch);
                 state.active_workspace = Some(ws.branch.clone());
+                tmux::set_right_pane_display_title(
+                    DASHBOARD_SESSION,
+                    &format!("Active: {}", ws.branch),
+                );
             }
             Err(e) => {
                 state.status_message = Some((format!("tmux: {}", e), std::time::Instant::now()));

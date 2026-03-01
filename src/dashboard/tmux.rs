@@ -298,16 +298,9 @@ pub fn resize_self_to_44_cols() {
     }
 }
 
-/// Returns true if the right content pane exists in the session.
-///
-/// Skips the indicator pane — only returns true when a non-indicator pane
-/// exists beyond the left TUI pane.
+/// Returns true if a right pane exists in the session (≥ 2 panes in main window).
 pub fn right_pane_exists(session: &str) -> bool {
-    let pane_ids = list_pane_ids(session);
-    pane_ids
-        .iter()
-        .skip(1)
-        .any(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
+    list_pane_ids(session).len() >= 2
 }
 
 /// Returns true if pane 0 in the given session's window 0 has its process exited.
@@ -397,111 +390,89 @@ pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> 
     Ok(())
 }
 
-/// Title used for the active workspace indicator pane (1-row, above right content area).
-pub const INDICATOR_PANE_TITLE: &str = "agentree-indicator";
-
-/// Create the 1-line active workspace indicator pane above the right content area.
+/// Enable pane border status for the dashboard window.
 ///
-/// Splits the right pane (main_panes[1]) vertically using `-b` (before/above) so the
-/// 1-row pane appears at the top. Sets the pane title to INDICATOR_PANE_TITLE.
+/// Sets `pane-border-status top` so each pane shows a 1-row title bar, and
+/// `pane-border-format` to display the per-pane `@agentree_title` user option.
+/// Also initialises the left pane title to "agentree".
 ///
-/// Call this after split_horizontal() in execute(). The resulting layout is:
-///   main_panes[0] = left TUI
-///   main_panes[1] = right-top indicator (1 row, shell showing placeholder)
-///   main_panes[2] = right-bottom content
-pub fn create_indicator_pane(session: &str) -> Result<()> {
-    let pane_ids = list_pane_ids(session);
-    let right_id = pane_ids
-        .get(1)
-        .ok_or_else(|| AgentreeError::TmuxError("No right pane for indicator split".to_string()))?
-        .clone();
-
-    // split-window -v -l 1 -b: vertical split, 1 row, before (above) the target pane
-    // -d: do not select the new pane (keep focus on current pane)
-    let out = Command::new("tmux")
+/// Call this once after split_horizontal() during session creation.
+pub fn setup_pane_border_status(session: &str) {
+    let window = first_window_index(session);
+    let target = format!("{}:{}", session, window);
+    let _ = Command::new("tmux")
+        .args(["set-option", "-t", &target, "pane-border-status", "top"])
+        .output();
+    let _ = Command::new("tmux")
         .args([
-            "split-window",
-            "-v",
-            "-l",
-            "1",
-            "-b",
-            "-d",
+            "set-option",
             "-t",
-            &right_id,
-            "printf 'No active workspace'; read",
+            &target,
+            "pane-border-format",
+            " #{@agentree_title}",
         ])
-        .output()
-        .map_err(|e| {
-            AgentreeError::TmuxError(format!("split-window for indicator failed: {}", e))
-        })?;
-    if !out.status.success() {
-        return Err(AgentreeError::TmuxError(format!(
-            "tmux split-window (indicator) failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+        .output();
+    // Set left pane display title to "agentree"
+    let pane_ids = list_pane_ids(session);
+    if let Some(left_id) = pane_ids.first() {
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-p",
+                "-t",
+                left_id,
+                "@agentree_title",
+                "agentree",
+            ])
+            .output();
     }
-
-    // The new pane is now at the top of the right column — it is pane_ids[1] in the refreshed list
-    let new_ids = list_pane_ids(session);
-    if let Some(indicator_id) = new_ids.get(1) {
-        let _ = set_pane_title(indicator_id, INDICATOR_PANE_TITLE);
-    }
-
-    Ok(())
 }
 
-/// Update the active workspace indicator pane to show the given branch name.
+/// Update the display title shown in the right pane's border.
 ///
-/// Uses respawn-pane -k to replace the indicator content with a printf command
-/// that displays "Active: <branch>" and then waits (so the text persists).
-/// The indicator pane is identified by its title INDICATOR_PANE_TITLE.
+/// Uses the per-pane tmux user option `@agentree_title` so the pane's
+/// identity title (used by find_pane_in_session) is not affected.
 ///
-/// Safe to call if the indicator pane does not exist — silently does nothing.
-pub fn update_indicator(session: &str, branch: &str) {
-    // Find indicator pane by title in the main window
+/// Safe to call if no right pane exists — silently does nothing.
+pub fn set_right_pane_display_title(session: &str, display: &str) {
     let pane_ids = list_pane_ids(session);
-    // The indicator is always pane_ids[1] by construction, but verify via title
-    let indicator_id = pane_ids
-        .iter()
-        .find(|id| get_pane_title(id) == INDICATOR_PANE_TITLE)
-        .cloned();
-
-    // Fallback: if title lookup fails, use index [1] directly
-    let target = match indicator_id {
-        Some(id) => id,
-        None => match pane_ids.get(1) {
-            Some(id) => id.clone(),
-            None => return,
-        },
-    };
-
-    // Use printf + read to display text and keep pane alive
-    // Single-quote shell-safe quoting for branch name
-    let safe_branch = branch.replace('\'', "'\\''");
-    let cmd = format!("printf 'Active: {}'; read", safe_branch);
-    let _ = Command::new("tmux")
-        .args(["respawn-pane", "-k", "-t", &target, &cmd])
-        .output();
+    if let Some(right_id) = pane_ids.get(1) {
+        let _ = Command::new("tmux")
+            .args([
+                "set-option",
+                "-p",
+                "-t",
+                right_id,
+                "@agentree_title",
+                display,
+            ])
+            .output();
+    }
 }
 
 const WELCOME_PANE_TITLE: &str = "agentree-welcome";
 
 /// Welcome/help panel content displayed on dashboard open and via the ? key.
 const WELCOME_CONTENT: &str = r#"
-   ___  __ _ ___ _ __  | |_ _ _ ___ ___
-  / _` / _` | -_) '_ \ |  _| '_/ -_) -_)
-  \__,_\__, |___| .__/  \__|_| \___\___|
-       |___/    |_|
+  ▗▄▖  ▗▄▄▖▗▄▄▄▖▗▖  ▗▖▗▄▄▄▖▗▄▄▖ ▗▄▄▄▖▗▄▄▄▖
+ ▐▌ ▐▌▐▌   ▐▌   ▐▛▚▖▐▌  █  ▐▌ ▐▌▐▌   ▐▌
+ ▐▛▀▜▌▐▌▝▜▌▐▛▀▀▘▐▌ ▝▜▌  █  ▐▛▀▚▖▐▛▀▀▘▐▛▀▀▘
+ ▐▌ ▐▌▝▚▄▞▘▐▙▄▄▖▐▌  ▐▌  █  ▐▌ ▐▌▐▙▄▄▖▐▙▄▄▖
+
 
   QUICK START
+
   agentree create <branch>  — create new workspace
 
+
   KEYBINDINGS
+
   j / down  navigate down       k / up    navigate up
   a         open agent          t         open terminal
   e         open editor         c         clear attention
   d         detach (background) q         quit dashboard
   ?         show this help
+
 
   Ctrl+\  return focus to left pane
 "#;
@@ -522,7 +493,10 @@ pub fn show_welcome_panel(session: &str) {
     let welcome_path_str = welcome_path.to_string_lossy().to_string();
 
     // Command: clear screen, cat the file, read to keep pane alive showing content
-    let cmd = format!("clear; cat '{}'; read -r -p '' _", welcome_path_str);
+    // `tail -f /dev/null` blocks portably across bash/zsh/sh/fish without
+    // requiring shell-specific read flags. The pane stays alive until replaced
+    // by show_pane (respawn-pane -k) when the user presses an action key.
+    let cmd = format!("clear; cat '{}'; tail -f /dev/null", welcome_path_str);
 
     // Use HOME as cwd fallback
     let cwd = std::env::var("HOME")
@@ -530,50 +504,31 @@ pub fn show_welcome_panel(session: &str) {
         .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
 
     let _ = show_pane(session, WELCOME_PANE_TITLE, &cmd, &cwd);
+    set_right_pane_display_title(session, "Help");
 }
 
-/// Returns true if the right-bottom content pane has exited (pane_dead = 1).
+/// Returns true if the right content pane has exited (pane_dead = 1).
 ///
-/// Identifies the content pane as the first non-indicator pane after the left TUI pane.
 /// Returns false on any error (safe default — avoid spurious respawn).
 pub fn is_content_pane_dead(session: &str) -> bool {
     let window = first_window_index(session);
     let target = format!("{}:{}", session, window);
-    let output = Command::new("tmux")
-        .args(["list-panes", "-t", &target, "-F", "#{pane_id} #{pane_dead}"])
-        .output();
-
-    let output = match output {
-        Ok(o) => o,
-        Err(_) => return false,
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-
-    // Find first non-indicator pane after the first pane (left TUI)
-    let mut past_first = false;
-    for line in text.lines() {
-        let mut parts = line.splitn(2, ' ');
-        let pane_id = match parts.next() {
-            Some(id) => id.trim().to_string(),
-            None => continue,
-        };
-        let dead_str = parts.next().unwrap_or("0").trim();
-
-        if !past_first {
-            past_first = true;
-            continue; // skip left TUI pane
-        }
-
-        // Skip the indicator pane
-        if get_pane_title(&pane_id) == INDICATOR_PANE_TITLE {
-            continue;
-        }
-
-        // This is the content pane — check if dead
-        return dead_str == "1";
-    }
-
-    false // no content pane found — not dead
+    Command::new("tmux")
+        .args(["list-panes", "-t", &target, "-F", "#{pane_dead}"])
+        .output()
+        .map(|o| {
+            let output = String::from_utf8_lossy(&o.stdout);
+            let mut lines = output.lines();
+            // Skip the left TUI pane (first in list).
+            lines.next();
+            match lines.next() {
+                // Right pane exists and its process has exited (remain-on-exit).
+                Some(l) => l.trim() == "1",
+                // No second pane at all — it was closed/removed when the process exited.
+                None => true,
+            }
+        })
+        .unwrap_or(false)
 }
 
 /// Resize the calling pane to a percentage of the terminal width.
@@ -704,14 +659,8 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         .ok_or_else(|| AgentreeError::TmuxError("Dashboard main window has no panes".to_string()))?
         .clone();
 
-    // 2. If a content pane exists (first non-indicator pane after left):
-    //    park named panes via break-pane, kill unnamed ones.
-    //    Skip the indicator pane (INDICATOR_PANE_TITLE) — it must persist.
-    let content_pane_id = main_panes
-        .iter()
-        .skip(1)
-        .find(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
-        .cloned();
+    // 2. If a right pane exists, park named panes via break-pane, kill unnamed ones.
+    let content_pane_id = main_panes.get(1).cloned();
 
     if let Some(right_id) = content_pane_id {
         let right_title = get_pane_title(&right_id);
@@ -734,47 +683,48 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         }
     }
 
-    // 3. Find the requested pane anywhere in the session, or create it.
-    let pane_to_show = if let Some(existing_id) = find_pane_in_session(session, title) {
-        existing_id
+    // 3. Restore a parked pane or create a fresh one in the main window.
+    if let Some(existing_id) = find_pane_in_session(session, title) {
+        // Bring back the parked pane via join-pane
+        let out = Command::new("tmux")
+            .args(["join-pane", "-h", "-s", &existing_id, "-t", &left_id])
+            .output()
+            .map_err(|e| AgentreeError::TmuxError(format!("join-pane to main failed: {}", e)))?;
+        if !out.status.success() {
+            return Err(AgentreeError::TmuxError(format!(
+                "tmux join-pane to main failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )));
+        }
     } else {
+        // Create a new right pane directly via split-window — simpler than new-window + join-pane
         let cwd_str = cwd.to_string_lossy();
         let out = Command::new("tmux")
             .args([
-                "new-window",
+                "split-window",
+                "-h",
                 "-d",
                 "-P",
                 "-F",
                 "#{pane_id}",
                 "-t",
-                session,
+                &left_id,
                 "-c",
                 &cwd_str,
                 cmd,
             ])
             .output()
-            .map_err(|e| AgentreeError::TmuxError(format!("new-window for pane failed: {}", e)))?;
+            .map_err(|e| {
+                AgentreeError::TmuxError(format!("split-window for pane failed: {}", e))
+            })?;
         if !out.status.success() {
             return Err(AgentreeError::TmuxError(format!(
-                "tmux new-window for pane failed: {}",
+                "tmux split-window for pane failed: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             )));
         }
         let new_pane_id = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        set_pane_title(&new_pane_id, title)?;
-        new_pane_id
-    };
-
-    // 5. Move the pane into the main window, to the right of the TUI pane
-    let out = Command::new("tmux")
-        .args(["join-pane", "-h", "-s", &pane_to_show, "-t", &left_id])
-        .output()
-        .map_err(|e| AgentreeError::TmuxError(format!("join-pane to main failed: {}", e)))?;
-    if !out.status.success() {
-        return Err(AgentreeError::TmuxError(format!(
-            "tmux join-pane to main failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        )));
+        let _ = set_pane_title(&new_pane_id, title);
     }
 
     // 6. Restore the TUI pane to its 44-column width
@@ -789,16 +739,9 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
 }
 
 /// Give keyboard focus to the right content pane of the main window.
-///
-/// Skips the indicator pane — focuses the first non-indicator pane after the left TUI pane.
 pub fn focus_right_pane(session: &str) {
     let pane_ids = list_pane_ids(session);
-    // Find content pane: first non-indicator pane after the left pane
-    let content = pane_ids
-        .iter()
-        .skip(1)
-        .find(|id| get_pane_title(id) != INDICATOR_PANE_TITLE);
-    if let Some(right_id) = content {
+    if let Some(right_id) = pane_ids.get(1) {
         let _ = Command::new("tmux")
             .args(["select-pane", "-t", right_id])
             .output();
