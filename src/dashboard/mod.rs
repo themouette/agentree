@@ -21,9 +21,11 @@ pub fn execute(tui_mode: bool) -> Result<()> {
         .ok_or_else(|| AgentreeError::DaemonError("Could not determine home directory".to_string()))?;
 
     if tui_mode {
-        // We are the TUI process running inside the left pane
+        // We are the TUI process running inside the left pane.
+        // Check if this session started the daemon (communicated via env var from parent).
+        let started_daemon = std::env::var("AGENTREE_STARTED_DAEMON").is_ok();
         let client = DaemonClient::connect(&sock_path)?;
-        return ui::run_tui(client);
+        return ui::run_tui(client, started_daemon);
     }
 
     // Check if already inside a tmux session and warn the user
@@ -49,15 +51,20 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     let repo_root = get_git_root()?
         .ok_or_else(|| AgentreeError::DaemonError("Not inside a git repository".to_string()))?;
 
-    // Ensure the daemon is running
-    ensure_daemon(&sock_path, &repo_root)?;
+    // Ensure the daemon is running; track whether we started it
+    let started_daemon = ensure_daemon(&sock_path, &repo_root)?;
 
     // Compute the agentree binary path once (used in both session paths)
     let agentree_bin = std::env::current_exe()
         .unwrap_or_else(|_| PathBuf::from("agentree"))
         .to_string_lossy()
         .to_string();
-    let tui_cmd = format!("{} dashboard --tui", agentree_bin);
+    // Pass started_daemon info to the TUI process via env var
+    let tui_cmd = if started_daemon {
+        format!("AGENTREE_STARTED_DAEMON=1 {} dashboard --tui", agentree_bin)
+    } else {
+        format!("{} dashboard --tui", agentree_bin)
+    };
 
     // DMN-04: handle_request() in daemon/mod.rs: Request::List => Response::Workspaces(state.snapshot())
     // DMN-05: watcher.rs watches .agentree/ dir; fires on status.json changes → state.update_workspace()
@@ -77,6 +84,9 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     // Session does not exist — create it
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
     tmux_util::create_session(DASHBOARD_SESSION, &shell, &repo_root)?;
+
+    // Hide the tmux status bar — users should not see the window list (implementation detail)
+    tmux_util::disable_status_bar(DASHBOARD_SESSION);
 
     // Enable focus-events so the TUI receives FocusLost/FocusGained when the
     // user switches panes. tmux disables this by default.
@@ -149,14 +159,16 @@ pub fn kill_dashboard() -> Result<()> {
 
 /// Ensure the daemon is running, starting it if necessary.
 ///
+/// Returns `Ok(true)` if this call started the daemon, `Ok(false)` if it was already running.
+///
 /// Progress display is TTY-aware:
 /// - Interactive terminal: spinner + "Starting agentree daemon..." (cleared on success)
 /// - Non-TTY (piped / CI): prints "Starting agentree daemon..." once, then polls silently
 ///
 /// On timeout, returns DaemonStartFailed with the log file path.
-fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
+fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<bool> {
     if try_connect(sock_path) {
-        return Ok(());
+        return Ok(false);
     }
 
     // Determine log path for error messages
@@ -210,7 +222,7 @@ fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<()> {
             if let Some(pb) = spinner {
                 pb.finish_and_clear();
             }
-            return Ok(());
+            return Ok(true);
         }
     }
 

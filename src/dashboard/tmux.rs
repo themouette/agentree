@@ -151,6 +151,14 @@ pub fn enable_focus_events() {
         .output();
 }
 
+/// Hide the tmux status bar for the dashboard session.
+/// Users should not see the tmux window list — these are implementation details.
+pub fn disable_status_bar(session: &str) {
+    let _ = Command::new("tmux")
+        .args(["set-option", "-t", session, "status", "off"])
+        .output();
+}
+
 /// Bind Ctrl+\ (session-scoped) to return focus to pane 0 of the dashboard session
 pub fn bind_key_return_to_dashboard(session: &str) {
     let window = first_window_index(session);
