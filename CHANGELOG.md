@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Running any agentree command from inside a linked worktree now correctly
+  resolves the main repository root. Previously `get_git_root()` used
+  `git rev-parse --show-toplevel`, which returns the worktree's own directory,
+  causing new worktrees to be placed in the wrong location and the `{repo}`
+  template variable to resolve to the worktree's directory name instead of the
+  main repository's name. Affected commands: `create`, `list`, `remove`,
+  `doctor`, and all workspace commands (`agent`, `shell`, `exec`, `editor`).
+
 ## [0.7.3] - 2026-02-27
 
 ### Fixed

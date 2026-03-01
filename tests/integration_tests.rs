@@ -2859,3 +2859,78 @@ fn test_remove_nonexistent_all_fail_exits_nonzero() {
         "remove should fail when no branches were removed"
     );
 }
+
+/// Regression test: creating a worktree from inside another worktree must place
+/// the new worktree next to its sibling, not nested inside the current worktree.
+///
+/// Before the fix, `get_git_root()` returned the current worktree's directory
+/// (via `--show-toplevel`), so the `{repo}` template variable resolved to the
+/// worktree's directory name rather than the main repo's name. This caused the
+/// second worktree to be created in a different directory than the first.
+/// This test verifies that both worktrees share the same parent directory.
+#[test]
+fn test_create_from_inside_worktree_uses_main_repo_root() {
+    let test_repo = TestRepo::new();
+    test_repo.init_git();
+    test_repo.commit("Initial commit");
+
+    // Create first worktree from main repo
+    let output = test_repo.agentree(&["create", "first-branch"]);
+    assert!(
+        output.status.success(),
+        "create first-branch should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    // Parse the actual worktree path from the success message ("... at <path>")
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let first_path = stdout
+        .trim()
+        .split(" at ")
+        .last()
+        .map(std::path::PathBuf::from)
+        .expect("create output should contain ' at <path>'");
+    assert!(
+        first_path.exists(),
+        "First worktree should exist at {}",
+        first_path.display()
+    );
+
+    // Now create a second worktree from INSIDE the first worktree
+    let output = test_repo.agentree_from(&first_path, &["create", "second-branch"]);
+    assert!(
+        output.status.success(),
+        "create second-branch from inside first worktree should succeed: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let second_path = stdout
+        .trim()
+        .split(" at ")
+        .last()
+        .map(std::path::PathBuf::from)
+        .expect("create output should contain ' at <path>'");
+    assert!(
+        second_path.exists(),
+        "Second worktree should exist at {}",
+        second_path.display()
+    );
+
+    // Both worktrees must share the same parent directory — they are siblings,
+    // not parent/child. Before the fix the second ended up nested under the first.
+    let first_parent = first_path
+        .parent()
+        .expect("first_path should have a parent");
+    let second_parent = second_path
+        .parent()
+        .expect("second_path should have a parent");
+    assert_eq!(
+        first_parent,
+        second_parent,
+        "Both worktrees should be siblings in the same directory.\n  \
+         first:  {}\n  second: {}",
+        first_path.display(),
+        second_path.display()
+    );
+}

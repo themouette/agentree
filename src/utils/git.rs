@@ -90,25 +90,25 @@ pub fn is_worktree() -> bool {
     false
 }
 
-/// Get the root directory of the git repository
-/// This returns the top-level directory containing the .git folder
+/// Get the root directory of the main git repository.
+///
+/// When called from inside a linked worktree, this returns the **main**
+/// repository's root directory, not the worktree's own top-level directory.
+/// This ensures consistent path resolution (worktree location, repo name)
+/// regardless of whether the current working directory is the main repo or
+/// one of its linked worktrees.
+///
+/// Internally uses `--git-common-dir` (which always points to the main repo's
+/// `.git` directory) and returns its parent.
 pub fn get_git_root() -> Result<Option<PathBuf>> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()
-        .map_err(|e| AgentreeError::Git(format!("Failed to run git: {}", e)))?;
-
-    if !output.status.success() {
-        return Ok(None);
-    }
-
-    let root_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let root_path = PathBuf::from(root_dir);
-
-    if root_path.is_dir() {
-        Ok(Some(root_path.canonicalize()?))
-    } else {
-        Ok(None)
+    match get_git_common_dir()? {
+        None => Ok(None),
+        Some(git_common_dir) => {
+            let root = git_common_dir.parent().ok_or_else(|| {
+                AgentreeError::Git("Cannot determine parent of git common dir".to_string())
+            })?;
+            Ok(Some(root.to_path_buf()))
+        }
     }
 }
 
