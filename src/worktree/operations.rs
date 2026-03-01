@@ -306,7 +306,7 @@ fn remove_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) {
     };
 
     if let Some(arr) = obj.get_mut("allowedTools").and_then(|v| v.as_array_mut()) {
-        arr.retain(|v| v.as_str().map_or(true, |s| !to_remove.iter().any(|r| r == s)));
+        arr.retain(|v| v.as_str().is_none_or(|s| !to_remove.iter().any(|r| r == s)));
         if arr.is_empty() {
             obj.remove("allowedTools");
         }

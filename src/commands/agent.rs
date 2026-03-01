@@ -59,9 +59,20 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     // Ensure workspace exists (create or resume) and set up metadata
     let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
 
+    // Set up CLAUDE.md and .claude/settings.json for this agent session
+    let session_setup =
+        crate::worktree::operations::setup_agent_session(&workspace.path)
+            .map_err(|e| eprintln!("Warning: could not set up agent session files: {e}"))
+            .ok();
+
     // Agent respects backend isolation (BACK-09)
     let backend = BackendType::from_kind(ctx.config.effective_backend());
-    backend.agent(&workspace.path, agent_bin.as_deref(), &all_flags)?;
+    let result = backend.agent(&workspace.path, agent_bin.as_deref(), &all_flags);
 
-    Ok(())
+    // Clean up CLAUDE.md and .claude/settings.json after the agent exits
+    if let Some(ref setup) = session_setup {
+        crate::worktree::operations::cleanup_agent_session(&workspace.path, setup);
+    }
+
+    result
 }
