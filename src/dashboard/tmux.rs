@@ -304,9 +304,13 @@ pub fn resize_self_to_44_cols() {
     }
 }
 
-/// Returns true if the right pane exists in the session (i.e. ≥ 2 panes present).
+/// Returns true if the right content pane exists in the session.
+///
+/// Skips the indicator pane — only returns true when a non-indicator pane
+/// exists beyond the left TUI pane.
 pub fn right_pane_exists(session: &str) -> bool {
-    list_pane_ids(session).len() >= 2
+    let pane_ids = list_pane_ids(session);
+    pane_ids.iter().skip(1).any(|id| get_pane_title(id) != INDICATOR_PANE_TITLE)
 }
 
 /// Returns true if pane 0 in the given session's window 0 has its process exited.
@@ -396,6 +400,84 @@ pub fn ensure_named_session(session: &str, cmd: &str, cwd: &Path) -> Result<()> 
         create_session(session, cmd, cwd)?;
     }
     Ok(())
+}
+
+/// Title used for the active workspace indicator pane (1-row, above right content area).
+pub const INDICATOR_PANE_TITLE: &str = "agentree-indicator";
+
+/// Create the 1-line active workspace indicator pane above the right content area.
+///
+/// Splits the right pane (main_panes[1]) vertically using `-b` (before/above) so the
+/// 1-row pane appears at the top. Sets the pane title to INDICATOR_PANE_TITLE.
+///
+/// Call this after split_horizontal() in execute(). The resulting layout is:
+///   main_panes[0] = left TUI
+///   main_panes[1] = right-top indicator (1 row, shell showing placeholder)
+///   main_panes[2] = right-bottom content
+pub fn create_indicator_pane(session: &str) -> Result<()> {
+    let pane_ids = list_pane_ids(session);
+    let right_id = pane_ids
+        .get(1)
+        .ok_or_else(|| AgentreeError::TmuxError("No right pane for indicator split".to_string()))?
+        .clone();
+
+    // split-window -v -l 1 -b: vertical split, 1 row, before (above) the target pane
+    // -d: do not select the new pane (keep focus on current pane)
+    let out = Command::new("tmux")
+        .args([
+            "split-window", "-v", "-l", "1", "-b", "-d",
+            "-t", &right_id,
+            "printf 'No active workspace'; read",
+        ])
+        .output()
+        .map_err(|e| AgentreeError::TmuxError(format!("split-window for indicator failed: {}", e)))?;
+    if !out.status.success() {
+        return Err(AgentreeError::TmuxError(format!(
+            "tmux split-window (indicator) failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+
+    // The new pane is now at the top of the right column — it is pane_ids[1] in the refreshed list
+    let new_ids = list_pane_ids(session);
+    if let Some(indicator_id) = new_ids.get(1) {
+        let _ = set_pane_title(indicator_id, INDICATOR_PANE_TITLE);
+    }
+
+    Ok(())
+}
+
+/// Update the active workspace indicator pane to show the given branch name.
+///
+/// Uses respawn-pane -k to replace the indicator content with a printf command
+/// that displays "Active: <branch>" and then waits (so the text persists).
+/// The indicator pane is identified by its title INDICATOR_PANE_TITLE.
+///
+/// Safe to call if the indicator pane does not exist — silently does nothing.
+pub fn update_indicator(session: &str, branch: &str) {
+    // Find indicator pane by title in the main window
+    let pane_ids = list_pane_ids(session);
+    // The indicator is always pane_ids[1] by construction, but verify via title
+    let indicator_id = pane_ids.iter().find(|id| {
+        get_pane_title(id) == INDICATOR_PANE_TITLE
+    }).cloned();
+
+    // Fallback: if title lookup fails, use index [1] directly
+    let target = match indicator_id {
+        Some(id) => id,
+        None => match pane_ids.get(1) {
+            Some(id) => id.clone(),
+            None => return,
+        }
+    };
+
+    // Use printf + read to display text and keep pane alive
+    // Single-quote shell-safe quoting for branch name
+    let safe_branch = branch.replace('\'', "'\\''");
+    let cmd = format!("printf 'Active: {}'; read", safe_branch);
+    let _ = Command::new("tmux")
+        .args(["respawn-pane", "-k", "-t", &target, &cmd])
+        .output();
 }
 
 const STASH_WINDOW: &str = "stash";
@@ -502,14 +584,19 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
         .ok_or_else(|| AgentreeError::TmuxError("Dashboard main window has no panes".to_string()))?
         .clone();
 
-    // 2. If a right pane exists: park named panes via break-pane, kill unnamed ones.
-    if main_panes.len() >= 2 {
-        let right_id = &main_panes[1];
-        let right_title = get_pane_title(right_id);
+    // 2. If a content pane exists (first non-indicator pane after left):
+    //    park named panes via break-pane, kill unnamed ones.
+    //    Skip the indicator pane (INDICATOR_PANE_TITLE) — it must persist.
+    let content_pane_id = main_panes.iter().skip(1).find(|id| {
+        get_pane_title(id) != INDICATOR_PANE_TITLE
+    }).cloned();
+
+    if let Some(right_id) = content_pane_id {
+        let right_title = get_pane_title(&right_id);
         if right_title.starts_with("agentree-") {
             // break-pane creates a new detached window for this pane — no size constraints.
             let out = Command::new("tmux")
-                .args(["break-pane", "-d", "-s", right_id])
+                .args(["break-pane", "-d", "-s", &right_id])
                 .output()
                 .map_err(|e| AgentreeError::TmuxError(format!("break-pane failed: {}", e)))?;
             if !out.status.success() {
@@ -520,7 +607,7 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
             }
         } else {
             let _ = Command::new("tmux")
-                .args(["kill-pane", "-t", right_id])
+                .args(["kill-pane", "-t", &right_id])
                 .output();
         }
     }
@@ -571,10 +658,16 @@ pub fn show_pane(session: &str, title: &str, cmd: &str, cwd: &Path) -> Result<()
     Ok(())
 }
 
-/// Give keyboard focus to the right pane of the main window.
+/// Give keyboard focus to the right content pane of the main window.
+///
+/// Skips the indicator pane — focuses the first non-indicator pane after the left TUI pane.
 pub fn focus_right_pane(session: &str) {
     let pane_ids = list_pane_ids(session);
-    if let Some(right_id) = pane_ids.get(1) {
+    // Find content pane: first non-indicator pane after the left pane
+    let content = pane_ids.iter().skip(1).find(|id| {
+        get_pane_title(id) != INDICATOR_PANE_TITLE
+    });
+    if let Some(right_id) = content {
         let _ = Command::new("tmux")
             .args(["select-pane", "-t", right_id])
             .output();
