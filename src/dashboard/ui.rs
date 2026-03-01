@@ -162,13 +162,12 @@ fn run_event_loop(
             .map_err(crate::error::AgentreeError::Io)?;
 
         // When Connecting or shutting down, poll frequently to transition fast
-        let poll_timeout = if state.startup == TuiStartupState::Connecting
-            || state.shutting_down.is_some()
-        {
-            Duration::from_millis(100)
-        } else {
-            REFRESH_INTERVAL
-        };
+        let poll_timeout =
+            if state.startup == TuiStartupState::Connecting || state.shutting_down.is_some() {
+                Duration::from_millis(100)
+            } else {
+                REFRESH_INTERVAL
+            };
 
         if event::poll(poll_timeout).map_err(crate::error::AgentreeError::Io)? {
             match event::read().map_err(crate::error::AgentreeError::Io)? {
@@ -445,7 +444,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
         // Layout within each row (approximate):
         // " 🤖 "(4) + ">_ "(3) + "E "(2) + attention(2) + branch(variable) + stats(8) + age(7) + spaces(3)
         // agent=4 (space+emoji[2]+space, or 4 spaces when idle), term=3, edit=2, attention=2, stats=8, age=7, spaces=3
-        let branch_width = list_width.saturating_sub(4 + 3 + 2 + 2 + 8 + 7 + 3).max(6);
+        let branch_width = list_width.saturating_sub(4 + 3 + 2 + 2 + 8 + 8 + 3).max(6);
 
         let items: Vec<ListItem> = state
             .workspaces
@@ -535,7 +534,7 @@ fn render_workspace_list(f: &mut ratatui::Frame, area: ratatui::layout::Rect, st
                     Span::raw(" "),
                     Span::styled(stats_str, Style::default().fg(Color::DarkGray)),
                     Span::raw(" "),
-                    Span::styled(format!("{:>7}", age), Style::default().fg(Color::DarkGray)),
+                    Span::styled(format!("{:>8}", age), Style::default().fg(Color::DarkGray)),
                 ];
 
                 let item_style = Style::default(); // No row background — selection highlight always wins cleanly
@@ -708,7 +707,7 @@ fn action_agent(state: &mut TuiState) {
         let agentree = std::env::current_exe()
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_else(|_| "agentree".to_string());
-        let cmd = format!("{} agent {}", agentree, shell_quote(&ws.branch));
+        let cmd = format!("{} agent {}", agentree, tmux::shell_quote(&ws.branch));
         let cwd = std::path::PathBuf::from(&ws.path);
         open_pane_for_workspace(state, title, cmd, cwd, ws.branch.clone());
     }
@@ -744,7 +743,7 @@ fn action_editor(state: &mut TuiState) {
         let title = tmux::editor_session_name(&ws.branch);
         let cwd = std::path::PathBuf::from(&ws.path);
         // Shell-quote only the binary; append extra args unquoted, then "."
-        let bin = shell_quote(editor_bin);
+        let bin = tmux::shell_quote(editor_bin);
         let edit_cmd = if parts.len() > 1 {
             format!("{} {} .", bin, parts[1])
         } else {
@@ -868,12 +867,6 @@ fn truncate_middle(s: &str, max: usize) -> String {
     format!("{}\u{2026}{}", prefix, suffix)
 }
 
-/// Wrap a string in single quotes with internal single quotes escaped.
-/// Safe for embedding in POSIX shell command strings.
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', r#"'"'"'"#))
-}
-
 /// Right-trim a string to at most `max` chars, appending "…" if truncated.
 fn truncate_right(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
@@ -972,23 +965,5 @@ mod tests {
         let result = truncate_right("hello world!", 8);
         assert_eq!(result.chars().count(), 8);
         assert!(result.ends_with('\u{2026}'));
-    }
-
-    // ── shell_quote ─────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_shell_quote_plain() {
-        assert_eq!(shell_quote("vim"), "'vim'");
-    }
-
-    #[test]
-    fn test_shell_quote_with_spaces() {
-        assert_eq!(shell_quote("vim -u config"), "'vim -u config'");
-    }
-
-    #[test]
-    fn test_shell_quote_with_single_quote() {
-        // it's → 'it'"'"'s'
-        assert_eq!(shell_quote("it's"), r#"'it'"'"'s'"#);
     }
 }
