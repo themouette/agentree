@@ -128,25 +128,32 @@ impl ForceLevel {
 
 /// Ensure `.claude/settings.json` contains `allowedTools` entries for `.agentree/**`.
 ///
-/// If the file does not exist, it is created from the template. If it already
-/// exists, any missing entries are appended to the `allowedTools` array so that
-/// pre-existing project settings are preserved.
-fn ensure_agentree_allowed_tools(settings_path: &Path) -> Result<()> {
-    const REQUIRED: &[&str] = &["Write(.agentree/**)", "Edit(.agentree/**)"];
+/// Both relative (`Write(.agentree/**)`) and absolute path variants are added so
+/// that Claude Code grants permission regardless of which form it checks.
+///
+/// If the file does not exist it is created. If it already exists, any missing
+/// entries are appended to the `allowedTools` array so pre-existing project
+/// settings are preserved.
+fn ensure_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) -> Result<()> {
+    let abs = worktree_path
+        .canonicalize()
+        .unwrap_or_else(|_| worktree_path.to_path_buf());
+    let abs_agentree = abs.join(".agentree").to_string_lossy().into_owned();
 
-    if !settings_path.exists() {
-        std::fs::write(
-            settings_path,
-            include_str!("../../templates/claude-settings.json"),
-        )
-        .map_err(AgentreeError::Io)?;
-        return Ok(());
-    }
+    let required: Vec<String> = vec![
+        "Write(.agentree/**)".into(),
+        "Edit(.agentree/**)".into(),
+        format!("Write({}/**)", abs_agentree),
+        format!("Edit({}/**)", abs_agentree),
+    ];
 
-    // Parse existing file; treat unparseable content as an empty object
-    let raw = std::fs::read_to_string(settings_path).map_err(AgentreeError::Io)?;
-    let mut value: serde_json::Value =
-        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+    // Parse existing file or start from an empty object
+    let mut value: serde_json::Value = if settings_path.exists() {
+        let raw = std::fs::read_to_string(settings_path).map_err(AgentreeError::Io)?;
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
 
     let allowed = value
         .as_object_mut()
@@ -156,8 +163,8 @@ fn ensure_agentree_allowed_tools(settings_path: &Path) -> Result<()> {
         .as_array_mut()
         .ok_or_else(|| AgentreeError::ConfigError("allowedTools is not an array".into()))?;
 
-    for entry in REQUIRED {
-        if !allowed.iter().any(|v: &serde_json::Value| v.as_str() == Some(entry)) {
+    for entry in &required {
+        if !allowed.iter().any(|v: &serde_json::Value| v.as_str() == Some(entry.as_str())) {
             allowed.push(serde_json::json!(entry));
         }
     }
@@ -188,7 +195,7 @@ fn setup_agentree_workspace(worktree_path: &Path) -> Result<()> {
     let claude_dir = worktree_path.join(".claude");
     std::fs::create_dir_all(&claude_dir).map_err(AgentreeError::Io)?;
     let settings_path = claude_dir.join("settings.json");
-    ensure_agentree_allowed_tools(&settings_path)?;
+    ensure_agentree_allowed_tools(&settings_path, worktree_path)?;
 
     // 4. Add .agentree/ to git exclude (non-critical, log warning on failure)
     if let Err(e) = add_agentree_to_git_exclude(worktree_path) {

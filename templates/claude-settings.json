@@ -1,6 +1,0 @@
-{
-  "allowedTools": [
-    "Write(.agentree/**)",
-    "Edit(.agentree/**)"
-  ]
-}
