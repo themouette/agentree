@@ -111,6 +111,10 @@ pub fn execute(tui_mode: bool) -> Result<()> {
     // Select left pane initially
     tmux_util::select_pane(DASHBOARD_SESSION, 0)?;
 
+    // Show welcome panel in the right content area on initial open
+    // Must happen before attach() since attach() replaces the current process
+    tmux_util::show_welcome_panel(DASHBOARD_SESSION);
+
     // Attach to the session (replaces current process)
     tmux_util::attach(DASHBOARD_SESSION)
 }

@@ -176,6 +176,10 @@ fn run_event_loop(
                         (_, KeyCode::Char('t')) => action_terminal(state),
                         (_, KeyCode::Char('e')) => action_editor(state),
                         (_, KeyCode::Char('c')) => action_clear_attention(state, client),
+                        // Help: show welcome/help panel
+                        (_, KeyCode::Char('?')) => {
+                            tmux::show_welcome_panel(DASHBOARD_SESSION);
+                        }
                         // Retry connection
                         (_, KeyCode::Char('r')) => {
                             if state.startup == TuiStartupState::ConnectionLost {
@@ -187,9 +191,17 @@ fn run_event_loop(
                 }
                 Event::FocusLost => {
                     state.focused = false;
+                    // Shrink back to 44 cols when right pane exists
+                    if tmux::right_pane_exists(DASHBOARD_SESSION) {
+                        tmux::resize_self_to_44_cols();
+                    }
                 }
                 Event::FocusGained => {
                     state.focused = true;
+                    // Expand to 50% width when right pane exists
+                    if tmux::right_pane_exists(DASHBOARD_SESSION) {
+                        tmux::resize_self_to_percent(50);
+                    }
                 }
                 Event::Resize(_, _) => {
                     // Restore 44-col width only when the right pane exists.
@@ -231,6 +243,13 @@ fn run_event_loop(
                 }
             }
             state.last_refresh = Instant::now();
+
+            // Auto-respawn welcome panel if the content pane has died
+            if state.startup == TuiStartupState::Connected
+                && tmux::is_content_pane_dead(DASHBOARD_SESSION)
+            {
+                tmux::show_welcome_panel(DASHBOARD_SESSION);
+            }
         }
     }
     Ok(())
