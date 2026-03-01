@@ -256,5 +256,18 @@ Plans:
 - [ ] 06-02-PLAN.md — kill-dashboard: `agentree dashboard --kill` tears down session + stops daemon
 - [ ] 06-03-PLAN.md — Human verification: Phase 6 UI improvements smoke test
 
+### Phase 7: improve UX
+
+**Goal:** Polish dashboard day-to-day usability: clearer quit/detach semantics, active workspace indicator, welcome panel, tmux status bar hidden, and left pane auto-resize on focus.
+**Requirements**: UX-01 (q/d semantics), UX-02 (daemon ownership), UX-03 (footer update), UX-04 (active indicator pane), UX-05 (welcome panel), UX-06 (tmux status bar off), UX-07 (left pane focus resize)
+**Depends on:** Phase 6
+**Plans:** 4 plans
+
+Plans:
+- [ ] 07-01-PLAN.md — Status bar off, daemon ownership flag, q/d/y/n key semantics, footer update
+- [ ] 07-02-PLAN.md — Active workspace indicator pane: 3-pane layout, show_pane update, update_indicator
+- [ ] 07-03-PLAN.md — Welcome panel, auto-respawn, left pane focus resize
+- [ ] 07-04-PLAN.md — Human verification: Phase 7 UX improvements smoke test
+
 ---
 *Roadmap created: 2026-02-27*
