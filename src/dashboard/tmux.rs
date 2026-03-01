@@ -480,6 +480,111 @@ pub fn update_indicator(session: &str, branch: &str) {
         .output();
 }
 
+const WELCOME_PANE_TITLE: &str = "agentree-welcome";
+
+/// Welcome/help panel content displayed on dashboard open and via the ? key.
+const WELCOME_CONTENT: &str = r#"
+   ___  __ _ ___ _ __  | |_ _ _ ___ ___
+  / _` / _` | -_) '_ \ |  _| '_/ -_) -_)
+  \__,_\__, |___| .__/  \__|_| \___\___|
+       |___/    |_|
+
+  QUICK START
+  agentree create <branch>  — create new workspace
+
+  KEYBINDINGS
+  j / down  navigate down       k / up    navigate up
+  a         open agent          t         open terminal
+  e         open editor         c         clear attention
+  d         detach (background) q         quit dashboard
+  ?         show this help
+
+  Ctrl+\  return focus to left pane
+"#;
+
+/// Show the welcome/help panel in the right content area.
+///
+/// Writes the welcome content to a temp file and displays it via `cat` in a
+/// persistent pane. The pane is titled WELCOME_PANE_TITLE so show_pane
+/// recognizes it as a named pane and preserves it when switching actions.
+pub fn show_welcome_panel(session: &str) {
+    // Determine welcome file path
+    let welcome_path = crate::daemon::runtime_dir()
+        .map(|d| d.join("welcome.txt"))
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp/agentree-welcome.txt"));
+
+    // Write welcome content to file
+    let _ = std::fs::write(&welcome_path, WELCOME_CONTENT);
+    let welcome_path_str = welcome_path.to_string_lossy().to_string();
+
+    // Command: clear screen, cat the file, read to keep pane alive showing content
+    let cmd = format!("clear; cat '{}'; read -r -p '' _", welcome_path_str);
+
+    // Use HOME as cwd fallback
+    let cwd = std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
+
+    let _ = show_pane(session, WELCOME_PANE_TITLE, &cmd, &cwd);
+}
+
+/// Returns true if the right-bottom content pane has exited (pane_dead = 1).
+///
+/// Identifies the content pane as the first non-indicator pane after the left TUI pane.
+/// Returns false on any error (safe default — avoid spurious respawn).
+pub fn is_content_pane_dead(session: &str) -> bool {
+    let window = first_window_index(session);
+    let target = format!("{}:{}", session, window);
+    let output = Command::new("tmux")
+        .args(["list-panes", "-t", &target, "-F", "#{pane_id} #{pane_dead}"])
+        .output();
+
+    let output = match output {
+        Ok(o) => o,
+        Err(_) => return false,
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+
+    // Find first non-indicator pane after the first pane (left TUI)
+    let mut past_first = false;
+    for line in text.lines() {
+        let mut parts = line.splitn(2, ' ');
+        let pane_id = match parts.next() {
+            Some(id) => id.trim().to_string(),
+            None => continue,
+        };
+        let dead_str = parts.next().unwrap_or("0").trim();
+
+        if !past_first {
+            past_first = true;
+            continue; // skip left TUI pane
+        }
+
+        // Skip the indicator pane
+        if get_pane_title(&pane_id) == INDICATOR_PANE_TITLE {
+            continue;
+        }
+
+        // This is the content pane — check if dead
+        return dead_str == "1";
+    }
+
+    false // no content pane found — not dead
+}
+
+/// Resize the calling pane to a percentage of the terminal width.
+///
+/// Uses $TMUX_PANE to identify the calling pane. Only call when a right pane exists.
+pub fn resize_self_to_percent(percent: u8) {
+    if let Ok(pane_id) = std::env::var("TMUX_PANE") {
+        let _ = Command::new("tmux")
+            .args([
+                "resize-pane", "-x", &format!("{}%", percent), "-t", &pane_id,
+            ])
+            .output();
+    }
+}
+
 const STASH_WINDOW: &str = "stash";
 
 /// Ensure the stash window exists in the dashboard session.
