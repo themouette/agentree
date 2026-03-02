@@ -109,6 +109,11 @@ impl Agent for ClaudeAgent {
 /// The absolute `.agentree/` path is baked in so the hook works regardless of
 /// the working directory Claude Code uses when executing it.
 fn build_pretooluse_command(abs_agentree: &str) -> String {
+    // `abs_agentree` is wrapped in double-quotes in the shell command.
+    // This is safe for paths with spaces, but would break for paths containing
+    // a literal `"` character.  Such paths are valid on Linux/macOS but
+    // vanishingly rare in practice; we accept the trade-off rather than
+    // adding a heavyweight escaping step.
     format!(
         "INPUT=$(cat); \
 TOOL=$(printf '%s' \"$INPUT\" | jq -r '.tool_name // \"tool\"' 2>/dev/null || echo \"tool\"); \
@@ -127,6 +132,7 @@ exit 0 {marker}",
 /// agent session has ended. Does not write `attention.md` — the session end
 /// is a status update, not an attention request.
 fn build_stop_command(abs_agentree: &str) -> String {
+    // Same double-quote assumption as `build_pretooluse_command`.
     format!(
         "mkdir -p \"{attn_dir}\"; \
 printf '{{\"phase\":\"done\"}}\\n' > \"{attn_dir}/status.json\" {marker}",

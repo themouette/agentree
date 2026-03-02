@@ -147,6 +147,9 @@ fn ensure_agentree_hooks(config_path: &Path, worktree_path: &Path) -> Result<()>
         .unwrap_or_else(|_| worktree_path.to_path_buf());
     let abs_agentree = abs.join(".agentree").to_string_lossy().into_owned();
 
+    // `abs_agentree` is wrapped in double-quotes in the shell command; safe for
+    // paths with spaces but not for paths containing a literal `"` character.
+    // Such paths are valid on Linux/macOS but extremely rare in practice.
     let stop_cmd = format!(
         "mkdir -p \"{dir}\" && printf '{{\"phase\":\"done\"}}\\n' > \"{dir}/status.json\" {marker}",
         dir = abs_agentree,
