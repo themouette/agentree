@@ -6,8 +6,8 @@ use super::Agent;
 /// No-op agent implementation for unknown agent names.
 ///
 /// `prepare` returns immediately with `Ok(())`, `cleanup` does nothing.
-/// Used automatically for agents without an explicit implementation
-/// (opencode, custom tools, etc.).
+/// Used automatically for agents without a dedicated implementation
+/// (custom/unknown tools).
 pub struct GenericAgent;
 
 impl GenericAgent {
