@@ -162,13 +162,11 @@ fn ensure_agentree_hooks(config_path: &Path, worktree_path: &Path) -> Result<()>
     };
 
     // Navigate: value["experimental"]["hook"]["session_completed"] -> array
-    let obj = value.as_object_mut().ok_or_else(|| {
-        AgentreeError::ConfigError("opencode.json root is not an object".into())
-    })?;
+    let obj = value
+        .as_object_mut()
+        .ok_or_else(|| AgentreeError::ConfigError("opencode.json root is not an object".into()))?;
 
-    let experimental = obj
-        .entry("experimental")
-        .or_insert(serde_json::json!({}));
+    let experimental = obj.entry("experimental").or_insert(serde_json::json!({}));
     let hook = experimental
         .as_object_mut()
         .ok_or_else(|| AgentreeError::ConfigError("experimental is not an object".into()))?
@@ -180,9 +178,7 @@ fn ensure_agentree_hooks(config_path: &Path, worktree_path: &Path) -> Result<()>
         .entry("session_completed")
         .or_insert(serde_json::json!([]))
         .as_array_mut()
-        .ok_or_else(|| {
-            AgentreeError::ConfigError("session_completed is not an array".into())
-        })?;
+        .ok_or_else(|| AgentreeError::ConfigError("session_completed is not an array".into()))?;
 
     // Idempotency: skip if agentree entry already present
     if !array_has_agentree_marker(session_completed) {
@@ -233,10 +229,7 @@ fn remove_agentree_hooks(config_path: &Path) {
 
         let hook_empty;
         {
-            let hook = match experimental
-                .get_mut("hook")
-                .and_then(|v| v.as_object_mut())
-            {
+            let hook = match experimental.get_mut("hook").and_then(|v| v.as_object_mut()) {
                 Some(h) => h,
                 None => return,
             };
@@ -287,8 +280,8 @@ fn remove_agentree_hooks(config_path: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{AGENTREE_END, AGENTREE_START};
+    use super::*;
 
     #[test]
     fn test_prepare_creates_files_in_empty_dir() {
@@ -309,7 +302,8 @@ mod tests {
         assert!(!path.join(".opencode").join("opencode.json").exists());
 
         // .agentree/attention.md written with "OpenCode running"
-        let attention = std::fs::read_to_string(path.join(".agentree").join("attention.md")).unwrap();
+        let attention =
+            std::fs::read_to_string(path.join(".agentree").join("attention.md")).unwrap();
         assert!(attention.contains("OpenCode running"));
     }
 
@@ -340,8 +334,11 @@ mod tests {
                 e.get("command")
                     .and_then(|c| c.as_array())
                     .map(|arr| {
-                        arr.iter()
-                            .any(|p| p.as_str().map(|s| s.contains(AGENTREE_HOOK_MARKER)).unwrap_or(false))
+                        arr.iter().any(|p| {
+                            p.as_str()
+                                .map(|s| s.contains(AGENTREE_HOOK_MARKER))
+                                .unwrap_or(false)
+                        })
                     })
                     .unwrap_or(false)
             })
@@ -356,7 +353,10 @@ mod tests {
 
         // The shell command string must mention status.json
         let shell_cmd = cmd_arr[2].as_str().unwrap();
-        assert!(shell_cmd.contains("status.json"), "hook command should write status.json");
+        assert!(
+            shell_cmd.contains("status.json"),
+            "hook command should write status.json"
+        );
     }
 
     #[test]
@@ -384,13 +384,19 @@ mod tests {
                 e.get("command")
                     .and_then(|c| c.as_array())
                     .map(|arr| {
-                        arr.iter()
-                            .any(|p| p.as_str().map(|s| s.contains(AGENTREE_HOOK_MARKER)).unwrap_or(false))
+                        arr.iter().any(|p| {
+                            p.as_str()
+                                .map(|s| s.contains(AGENTREE_HOOK_MARKER))
+                                .unwrap_or(false)
+                        })
                     })
                     .unwrap_or(false)
             })
             .count();
-        assert_eq!(agentree_count, 1, "expected exactly one agentree entry in session_completed, found {agentree_count}");
+        assert_eq!(
+            agentree_count, 1,
+            "expected exactly one agentree entry in session_completed, found {agentree_count}"
+        );
     }
 
     #[test]
@@ -495,7 +501,11 @@ mod tests {
                 }
             }
         });
-        std::fs::write(path.join("opencode.json"), serde_json::to_string(&existing).unwrap()).unwrap();
+        std::fs::write(
+            path.join("opencode.json"),
+            serde_json::to_string(&existing).unwrap(),
+        )
+        .unwrap();
 
         let token = agent.prepare(path).unwrap();
         agent.cleanup(path, &token);
@@ -516,11 +526,17 @@ mod tests {
                 .map(|arr| arr.iter().any(|p| p.as_str() == Some("notify-send")))
                 .unwrap_or(false)
         });
-        assert!(user_present, "user session_completed hook should be preserved");
+        assert!(
+            user_present,
+            "user session_completed hook should be preserved"
+        );
 
         // Agentree hook removed
         let agentree_present = array_has_agentree_marker(sc);
-        assert!(!agentree_present, "agentree hook should be removed after cleanup");
+        assert!(
+            !agentree_present,
+            "agentree hook should be removed after cleanup"
+        );
     }
 
     #[test]
@@ -544,8 +560,11 @@ mod tests {
                 e.get("command")
                     .and_then(|c| c.as_array())
                     .map(|arr| {
-                        arr.iter()
-                            .any(|p| p.as_str().map(|s| s.contains(AGENTREE_HOOK_MARKER)).unwrap_or(false))
+                        arr.iter().any(|p| {
+                            p.as_str()
+                                .map(|s| s.contains(AGENTREE_HOOK_MARKER))
+                                .unwrap_or(false)
+                        })
                     })
                     .unwrap_or(false)
             })

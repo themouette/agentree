@@ -403,8 +403,8 @@ fn remove_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{AGENTREE_END, AGENTREE_START};
+    use super::*;
 
     // ─── Existing tests (migrated from Phase 8) ───────────────────────────────
 
