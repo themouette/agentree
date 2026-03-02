@@ -127,16 +127,12 @@ exit 0 {marker}",
 
 /// Build the shell command for the `Stop` hook.
 ///
-/// Writes:
-/// - `attention.md`: `"Agent done\nSession ended. Review output in the right pane.\n"`
-/// - `status.json`: `{"phase":"done"}`
-///
-/// This signals the dashboard that the agent session has ended and human attention
-/// is requested.
+/// Writes `status.json`: `{"phase":"done"}` to signal the dashboard that the
+/// agent session has ended. Does not write `attention.md` — the session end
+/// is a status update, not an attention request.
 fn build_stop_command(abs_agentree: &str) -> String {
     format!(
         "mkdir -p \"{attn_dir}\"; \
-printf 'Agent done\\nSession ended. Review output in the right pane.\\n' > \"{attn_dir}/attention.md\"; \
 printf '{{\"phase\":\"done\"}}\\n' > \"{attn_dir}/status.json\" {marker}",
         attn_dir = abs_agentree,
         marker = AGENTREE_HOOK_MARKER
@@ -281,7 +277,13 @@ fn remove_agentree_hooks(settings_path: &Path) {
 
     if let Some(hooks_val) = obj.get_mut("hooks") {
         if let Some(hooks_obj) = hooks_val.as_object_mut() {
-            for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
+            for event in &[
+                "PreToolUse",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "UserPromptSubmit",
+                "Stop",
+            ] {
                 if let Some(groups) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
                     groups.retain(|g| !group_has_agentree_marker(g));
                 }
@@ -633,7 +635,13 @@ mod tests {
         assert!(hooks.is_object(), "hooks should be an object");
 
         // Each of the five events must have at least one group with the marker
-        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
+        for event in &[
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             let groups = hooks[*event]
                 .as_array()
                 .unwrap_or_else(|| panic!("{event} array missing"));
@@ -641,7 +649,7 @@ mod tests {
             assert!(has_agentree, "no agentree hook found for {event}");
         }
 
-        // Stop hook must mention "Agent done"
+        // Stop hook must update status.json with phase done
         let stop_groups = hooks["Stop"].as_array().unwrap();
         let stop_cmd = stop_groups
             .iter()
@@ -650,8 +658,12 @@ mod tests {
             .find_map(|h| h.get("command").and_then(|c| c.as_str()))
             .expect("Stop hook command not found");
         assert!(
-            stop_cmd.contains("Agent done"),
-            "Stop hook command should contain 'Agent done'"
+            stop_cmd.contains("status.json"),
+            "Stop hook command should write status.json"
+        );
+        assert!(
+            !stop_cmd.contains("attention.md"),
+            "Stop hook command should not write attention.md"
         );
     }
 
@@ -668,7 +680,13 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let hooks = value.get("hooks").expect("hooks key missing");
 
-        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
+        for event in &[
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             let groups = hooks[*event].as_array().unwrap();
             let agentree_count = groups
                 .iter()
@@ -718,7 +736,13 @@ mod tests {
         assert!(user_present, "user hook should be preserved after cleanup");
 
         // No agentree hook should remain in any event
-        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
+        for event in &[
+            "PreToolUse",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             if let Some(groups) = value["hooks"].get(*event).and_then(|v| v.as_array()) {
                 let agentree_present = groups.iter().any(group_has_agentree_marker);
                 assert!(
