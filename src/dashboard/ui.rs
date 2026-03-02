@@ -198,9 +198,9 @@ fn run_event_loop(
                             execute_detach();
                             // Don't break — TUI keeps running; `agentree dashboard` reattaches
                         }
-                        // Force-quit: actually exit the TUI process
+                        // Ctrl+C: graceful shutdown (same as 'q')
                         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                            break;
+                            begin_quit(state);
                         }
                         // Navigation
                         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => state.next(),
