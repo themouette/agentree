@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`agentree dashboard`** — new command that opens a tmux session with a live
+  workspace list on the left and a dynamic content pane on the right. Displays
+  branch name, agent status, commits ahead, dirty-file count, and last-commit
+  age for every worktree.
+- **`agentree daemon`** — new background process that tracks workspace state by
+  watching `.agentree/` directories in each worktree (sub-second response via
+  `notify`) and serving the dashboard over a Unix socket
+  (`~/.agentree/daemon.sock`). The daemon is started automatically by
+  `agentree dashboard` if not already running.
+- **Agent status protocol** — agents write `.agentree/status.json` (phase +
+  current task) and `.agentree/attention.md` (blocked / needs input) to
+  communicate live state to the dashboard. Both files are excluded from git
+  tracking automatically.
+- **`agentree dashboard --kill`** — terminate an existing dashboard tmux
+  session and its daemon from outside the TUI.
+- **CLAUDE.md template** — when `agentree agent` starts a session, it injects
+  an agentree-specific block into `CLAUDE.md` explaining the status protocol
+  and attention-request convention. The block is removed on session exit.
+- **`.claude/settings.json` per session** — `agentree agent` now merges
+  `allowedTools` entries for `.agentree/**` into `.claude/settings.json` before
+  launching Claude Code, so agents can write status files without tool-use
+  prompts. Entries are cleaned up on exit.
+- **Graceful dashboard shutdown** — pressing `q` (then `y` to confirm) sends
+  SIGTERM to all workspace panes before killing the tmux session, giving agents
+  a chance to clean up. A "Shutting down…" goodbye screen is shown while
+  waiting (up to 10 s).
+- **Welcome / help panel** — press `?` in the dashboard to open a welcome pane
+  explaining the key bindings and status protocol.
+- **Scrollbar** — the workspace list now shows a scrollbar when there are more
+  workspaces than fit on screen.
+- **Detach key** (`d`) — leaves the dashboard session running in the background
+  without killing it (analogous to `tmux detach`). `q` prompts for full
+  teardown.
+- **Robot icon** — the TUI shows a 🤖 icon next to a workspace row when an
+  agent session is live for that branch (presence-based, no polling).
+- **Auto-respawn** — if the content pane dies (e.g. agent exits), the dashboard
+  automatically reopens the welcome panel so the TUI is never left with a dead
+  right pane.
+
+### Changed
+
+- `agentree agent` now writes/cleans up `CLAUDE.md` and `.claude/settings.json`
+  around each session instead of leaving the worktree unmodified.
+
+### Fixed
+
+- Git utilities now use `git rev-parse --git-common-dir` to locate the common
+  git directory, replacing fragile manual `.git` file parsing. This correctly
+  handles both main checkouts and linked worktrees.
+- Dashboard tmux helpers now shell-quote all branch names and paths before
+  passing them to tmux commands, preventing breakage on branches with spaces or
+  special characters.
+
 ## [0.7.4] - 2026-03-01
 
 ### Fixed

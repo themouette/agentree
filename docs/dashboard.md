@@ -30,6 +30,9 @@ agentree dashboard
 
 # The dashboard opens a tmux session named "agentree-dashboard"
 # Press Ctrl+\ at any time to return focus to the list pane
+
+# Kill an existing dashboard session from outside the TUI
+agentree dashboard --kill
 ```
 
 ## Requirements
@@ -49,7 +52,9 @@ agentree dashboard
 | `t` | Open terminal in right pane |
 | `e` | Open editor (`$EDITOR`) in right pane |
 | `c` | Clear attention flag for selected workspace |
-| `q` | Quit the TUI (tmux session and agents keep running) |
+| `d` | Detach — leave the dashboard session running in the background |
+| `q` | Quit — prompts for confirmation (`y/N`), then kills all workspace panes and the tmux session |
+| `?` | Show the welcome / help panel in the right pane |
 | `Ctrl+\` | Return focus to list pane from anywhere |
 
 ### Status Column
@@ -69,9 +74,17 @@ agentree dashboard
 
 ### Agent Sessions
 
-Pressing `a` attaches the right pane to the workspace's agent tmux session (named `agentree:<branch>`). If no agent session exists, one is created running `claude` in the worktree.
+Pressing `a` attaches the right pane to the workspace's agent tmux session (named `agentree:<branch>`). If no agent session exists, one is created by running `agentree agent <branch>` in the worktree.
 
-Agent sessions persist independently — quitting the dashboard TUI leaves all agents running.
+A 🤖 icon appears next to a workspace row when an agent session is live for that branch. The icon disappears as soon as the session exits.
+
+Before launching Claude Code, `agentree agent` automatically:
+- Injects an agentree-specific block into `CLAUDE.md` explaining the status protocol and how to request human attention.
+- Merges `.agentree/**` `allowedTools` entries into `.claude/settings.json` so Claude Code can write status files without triggering tool-use prompts.
+
+Both changes are reverted when the agent session exits.
+
+Agent sessions persist independently — pressing `d` to detach from the dashboard leaves all agents running. Pressing `q` (and confirming with `y`) sends SIGTERM to all workspace panes before tearing down the session.
 
 ### Right Pane
 
