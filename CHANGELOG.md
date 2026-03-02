@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-respawn** — if the content pane dies (e.g. agent exits), the dashboard
   automatically reopens the welcome panel so the TUI is never left with a dead
   right pane.
+- **Agent trait abstraction** — agent-specific workspace hooks (`prepare`/`cleanup`) are
+  now encapsulated behind an `Agent` trait, mirroring the `Backend` trait. `ClaudeAgent`
+  implements the CLAUDE.md injection and `.claude/settings.json` allowedTools management.
+  `GenericAgent` provides a no-op implementation for all other agents. The factory
+  `AgentType::from_name` resolves agent names to concrete implementations.
 
 ### Changed
 
