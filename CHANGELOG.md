@@ -55,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **ClaudeAgent hook injection** — `ClaudeAgent::prepare()` now injects Claude Code hook
+  configurations into `.claude/settings.json` under the `hooks` key. The hooks automate
+  the `.agentree/attention.md` lifecycle that previously relied on the agent following
+  `CLAUDE.md` instructions:
+  - **PreToolUse**: writes `attention.md` with `"Waiting for approval: <ToolName>"` before
+    every tool call so the dashboard always reflects what the agent is doing.
+  - **PostToolUse**: deletes `attention.md` as soon as the tool completes.
+  - **UserPromptSubmit**: deletes `attention.md` when the user sends a message.
+  - **Stop**: writes `attention.md` (`"Agent done"`) and `status.json` (`{"phase":"done"}`)
+    when the agent session ends.
+  - `prepare()` also removes any stale `attention.md` from the prior session on startup.
+  - `cleanup()` removes only agentree-owned hook entries, preserving any user-defined hooks.
+  - No change to `CLAUDE.md` template — instructions remain as human-readable fallback.
 - `agentree agent` now writes/cleans up `CLAUDE.md` and `.claude/settings.json`
   around each session instead of leaving the worktree unmodified.
 
