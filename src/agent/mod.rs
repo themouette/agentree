@@ -91,6 +91,11 @@ pub(crate) fn remove_agentree_block(path: &Path) {
         None => return,
     };
 
+    // Guard against malformed files where the end marker precedes the start.
+    if end_pos < start_pos + AGENTREE_START.len() {
+        return;
+    }
+
     // Byte offset just past `<!-- agentree:end -->`, skipping one trailing newline
     let end_byte = end_pos + AGENTREE_END.len();
     let end_byte = if content.as_bytes().get(end_byte) == Some(&b'\n') {
