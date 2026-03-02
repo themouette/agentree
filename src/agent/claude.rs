@@ -198,6 +198,7 @@ fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<(
     let hooks_to_inject: &[(&str, String)] = &[
         ("PreToolUse", build_pretooluse_command(&abs_agentree)),
         ("PostToolUse", rm_cmd.clone()),
+        ("PostToolUseFailure", rm_cmd.clone()),
         ("UserPromptSubmit", rm_cmd.clone()),
         ("Stop", build_stop_command(&abs_agentree)),
     ];
@@ -212,13 +213,11 @@ fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<(
 
     // Get or create `value["hooks"]` as a JSON object
     {
-        let obj = value
-            .as_object_mut()
-            .ok_or_else(|| AgentreeError::ConfigError("settings.json root is not an object".into()))?;
+        let obj = value.as_object_mut().ok_or_else(|| {
+            AgentreeError::ConfigError("settings.json root is not an object".into())
+        })?;
 
-        let hooks_val = obj
-            .entry("hooks")
-            .or_insert(serde_json::json!({}));
+        let hooks_val = obj.entry("hooks").or_insert(serde_json::json!({}));
 
         if hooks_val.as_object().is_none() {
             return Err(AgentreeError::ConfigError(
@@ -282,7 +281,7 @@ fn remove_agentree_hooks(settings_path: &Path) {
 
     if let Some(hooks_val) = obj.get_mut("hooks") {
         if let Some(hooks_obj) = hooks_val.as_object_mut() {
-            for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+            for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
                 if let Some(groups) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
                     groups.retain(|g| !group_has_agentree_marker(g));
                 }
@@ -291,11 +290,7 @@ fn remove_agentree_hooks(settings_path: &Path) {
             hooks_obj.retain(|_, v| v.as_array().map(|a| !a.is_empty()).unwrap_or(true));
         }
         // Remove "hooks" key if the object is now empty
-        if hooks_val
-            .as_object()
-            .map(|o| o.is_empty())
-            .unwrap_or(false)
-        {
+        if hooks_val.as_object().map(|o| o.is_empty()).unwrap_or(false) {
             obj.remove("hooks");
         }
     }
@@ -630,16 +625,15 @@ mod tests {
 
         agent.prepare(path).unwrap();
 
-        let raw =
-            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let raw = std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
         // "hooks" key must be a JSON object
         let hooks = value.get("hooks").expect("hooks key missing");
         assert!(hooks.is_object(), "hooks should be an object");
 
-        // Each of the four events must have at least one group with the marker
-        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+        // Each of the five events must have at least one group with the marker
+        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
             let groups = hooks[*event]
                 .as_array()
                 .unwrap_or_else(|| panic!("{event} array missing"));
@@ -670,14 +664,16 @@ mod tests {
         agent.prepare(path).unwrap();
         agent.prepare(path).unwrap(); // second call must not duplicate
 
-        let raw =
-            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let raw = std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let hooks = value.get("hooks").expect("hooks key missing");
 
-        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
             let groups = hooks[*event].as_array().unwrap();
-            let agentree_count = groups.iter().filter(|g| group_has_agentree_marker(g)).count();
+            let agentree_count = groups
+                .iter()
+                .filter(|g| group_has_agentree_marker(g))
+                .count();
             assert_eq!(
                 agentree_count, 1,
                 "expected exactly 1 agentree hook group for {event}, found {agentree_count}"
@@ -722,7 +718,7 @@ mod tests {
         assert!(user_present, "user hook should be preserved after cleanup");
 
         // No agentree hook should remain in any event
-        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+        for event in &["PreToolUse", "PostToolUse", "PostToolUseFailure", "UserPromptSubmit", "Stop"] {
             if let Some(groups) = value["hooks"].get(*event).and_then(|v| v.as_array()) {
                 let agentree_present = groups.iter().any(group_has_agentree_marker);
                 assert!(
@@ -783,8 +779,7 @@ mod tests {
 
         agent.prepare(path).unwrap();
 
-        let raw =
-            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let raw = std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
         // Get the PreToolUse command
