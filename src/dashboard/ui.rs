@@ -140,11 +140,11 @@ fn run_event_loop(
     loop {
         state.frame = state.frame.wrapping_add(1);
 
-        // Complete shutdown when all signaled processes have exited, or after 10s max
+        // Complete shutdown when all signaled processes have exited, or after 20s max
         if let Some(shutdown_start) = state.shutting_down {
             let all_done = state.shutdown_pids.is_empty()
                 || state.shutdown_pids.iter().all(|&pid| !pid_is_alive(pid));
-            if all_done || shutdown_start.elapsed() >= Duration::from_secs(10) {
+            if all_done || shutdown_start.elapsed() >= Duration::from_secs(20) {
                 let _ = tmux::kill_session(DASHBOARD_SESSION);
                 break;
             }
@@ -786,7 +786,7 @@ fn begin_quit(state: &mut TuiState) {
     // so the event loop can monitor them and exit as soon as all have stopped.
     state.shutdown_pids = tmux::signal_workspace_panes(DASHBOARD_SESSION);
 
-    // Start the goodbye timer; tmux kill_session fires when all PIDs exit or after 10s
+    // Start the goodbye timer; tmux kill_session fires when all PIDs exit or after 20s
     state.shutting_down = Some(Instant::now());
 }
 
