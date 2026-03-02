@@ -198,9 +198,13 @@ fn run_event_loop(
                             execute_detach();
                             // Don't break — TUI keeps running; `agentree dashboard` reattaches
                         }
-                        // Ctrl+C: graceful shutdown (same as 'q')
+                        // Ctrl+C: show confirmation footer (same as 'q')
                         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                            begin_quit(state);
+                            if !state.quit_pending {
+                                state.quit_pending = true;
+                            } else {
+                                state.quit_pending = false;
+                            }
                         }
                         // Navigation
                         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => state.next(),
