@@ -222,62 +222,59 @@ fn remove_agentree_hooks(config_path: &Path) {
         None => return,
     };
 
-    // Navigate and clean up session_completed
-    let experimental_empty;
-    {
-        let experimental = match obj.get_mut("experimental").and_then(|v| v.as_object_mut()) {
-            Some(e) => e,
-            None => return,
-        };
-
-        let hook_empty;
-        {
-            let hook = match experimental.get_mut("hook").and_then(|v| v.as_object_mut()) {
-                Some(h) => h,
-                None => return,
-            };
-
-            if let Some(sc) = hook
-                .get_mut("session_completed")
-                .and_then(|v| v.as_array_mut())
-            {
-                sc.retain(|entry| {
-                    !entry
-                        .get("command")
-                        .and_then(|c| c.as_array())
-                        .map(|arr| {
-                            arr.iter().any(|p| {
-                                p.as_str()
-                                    .map(|s| s.contains(AGENTREE_HOOK_MARKER))
-                                    .unwrap_or(false)
-                            })
-                        })
-                        .unwrap_or(false)
-                });
-
-                if sc.is_empty() {
-                    hook.remove("session_completed");
-                }
-            }
-
-            hook_empty = hook.is_empty();
-        }
-
-        if hook_empty {
-            experimental.remove("hook");
-        }
-
-        experimental_empty = experimental.is_empty();
-    }
-
-    if experimental_empty {
-        obj.remove("experimental");
-    }
+    strip_agentree_session_completed(obj);
 
     if obj.is_empty() {
         let _ = std::fs::remove_file(config_path);
     } else if let Ok(updated) = serde_json::to_string_pretty(&value) {
         let _ = std::fs::write(config_path, updated + "\n");
+    }
+}
+
+/// Strip agentree-owned entries from `experimental.hook.session_completed` and
+/// prune any intermediate keys that become empty as a result.
+///
+/// Returns early (leaving `obj` unchanged) if any expected key is absent or
+/// the wrong type — this is the non-error "nothing to do" case.
+fn strip_agentree_session_completed(obj: &mut serde_json::Map<String, serde_json::Value>) {
+    let experimental = match obj.get_mut("experimental").and_then(|v| v.as_object_mut()) {
+        Some(e) => e,
+        None => return,
+    };
+
+    let hook = match experimental.get_mut("hook").and_then(|v| v.as_object_mut()) {
+        Some(h) => h,
+        None => return,
+    };
+
+    if let Some(sc) = hook
+        .get_mut("session_completed")
+        .and_then(|v| v.as_array_mut())
+    {
+        sc.retain(|entry| {
+            !entry
+                .get("command")
+                .and_then(|c| c.as_array())
+                .map(|arr| {
+                    arr.iter().any(|p| {
+                        p.as_str()
+                            .map(|s| s.contains(AGENTREE_HOOK_MARKER))
+                            .unwrap_or(false)
+                    })
+                })
+                .unwrap_or(false)
+        });
+
+        if sc.is_empty() {
+            hook.remove("session_completed");
+        }
+    }
+
+    if hook.is_empty() {
+        experimental.remove("hook");
+    }
+    if experimental.is_empty() {
+        obj.remove("experimental");
     }
 }
 
