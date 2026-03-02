@@ -206,7 +206,11 @@ fn inject_agentree_block(path: &Path) -> Result<()> {
         if content.contains(AGENTREE_START) {
             return Ok(()); // already injected
         }
-        let separator = if content.ends_with('\n') { "\n" } else { "\n\n" };
+        let separator = if content.ends_with('\n') {
+            "\n"
+        } else {
+            "\n\n"
+        };
         std::fs::write(path, format!("{}{}{}", content, separator, block))
             .map_err(AgentreeError::Io)?;
     } else {
@@ -1148,8 +1152,7 @@ mod tests {
         assert_eq!(content.matches(AGENTREE_START).count(), 1);
 
         // Each allowedTools entry appears exactly once
-        let raw =
-            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let raw = std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let tools = value["allowedTools"].as_array().unwrap();
         let write_count = tools
