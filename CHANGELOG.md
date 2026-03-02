@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implements the CLAUDE.md injection and `.claude/settings.json` allowedTools management.
   `GenericAgent` provides a no-op implementation for all other agents. The factory
   `AgentType::from_name` resolves agent names to concrete implementations.
+- **`OpencodeAgent`** — new `Agent` trait implementation for OpenCode. `prepare()` injects
+  an agentree block into `AGENTS.md` (OpenCode's workspace context file), injects a
+  `session_completed` hook into `opencode.json` that writes `{"phase":"done"}` to
+  `.agentree/status.json` when the session ends, and writes `"OpenCode running"` to
+  `.agentree/attention.md` as a guaranteed dashboard signal. `cleanup()` reverts all
+  workspace changes. `AgentType::from_name("opencode")` now resolves to this implementation
+  instead of `GenericAgent`.
 
 ### Changed
 
