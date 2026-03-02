@@ -1,3 +1,4 @@
+use crate::agent::{Agent, AgentType};
 use crate::backend::{Backend, BackendKind, BackendType};
 use crate::commands::common::{WorkspaceArgs, WorkspaceContext};
 use crate::error::Result;
@@ -29,24 +30,32 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     // Determine which backend we're using
     let backend_kind = ctx.config.effective_backend();
 
-    // Resolve agent based on backend requirements:
-    // - local backend: agent is required
-    // - docker-sandbox backend: agent is required
-    // - claude-vm backend: agent is optional (claude-vm can handle agent selection)
+    // Determine the logical agent name for trait dispatch.
+    // ClaudeVm with no explicit agent still defaults to "claude" so that
+    // CLAUDE.md injection and settings.json allowedTools are set up even
+    // when claude-vm manages agent selection on its own.
+    let agent_logical_name: &str = match backend_kind {
+        BackendKind::ClaudeVm if args.agent.is_none() => "claude",
+        _ => args
+            .agent
+            .as_deref()
+            .or(ctx.config.agent.default.as_deref())
+            .unwrap_or("claude"),
+    };
+
+    // Resolve agent binary path and default flags for backend invocation.
+    // - local / docker-sandbox: agent is required
+    // - claude-vm: agent is optional (claude-vm can handle agent selection)
     let (agent_bin, default_args) = match backend_kind {
         BackendKind::Local | BackendKind::DockerSandbox => {
-            // Local and docker-sandbox backends require an agent
-            let (bin, args) = ctx.config.resolve_agent(args.agent.as_deref())?;
-            (Some(bin), args)
+            let (bin, flags) = ctx.config.resolve_agent(args.agent.as_deref())?;
+            (Some(bin), flags)
         }
         BackendKind::ClaudeVm => {
-            // Claude-vm backend: agent is optional
             if args.agent.is_some() {
-                // User explicitly specified an agent, resolve it
-                let (bin, args) = ctx.config.resolve_agent(args.agent.as_deref())?;
-                (Some(bin), args)
+                let (bin, flags) = ctx.config.resolve_agent(args.agent.as_deref())?;
+                (Some(bin), flags)
             } else {
-                // No agent specified, let claude-vm handle it
                 (None, vec![])
             }
         }
@@ -59,8 +68,10 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     // Ensure workspace exists (create or resume) and set up metadata
     let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
 
-    // Set up CLAUDE.md and .claude/settings.json for this agent session
-    let session_setup = crate::worktree::operations::setup_agent_session(&workspace.path)
+    // Prepare agent workspace files (e.g. CLAUDE.md injection, settings.json allowedTools)
+    let agent_impl = AgentType::from_name(agent_logical_name);
+    let token = agent_impl
+        .prepare(&workspace.path)
         .map_err(|e| eprintln!("Warning: could not set up agent session files: {e}"))
         .ok();
 
@@ -68,9 +79,9 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     let backend = BackendType::from_kind(ctx.config.effective_backend());
     let result = backend.agent(&workspace.path, agent_bin.as_deref(), &all_flags);
 
-    // Clean up CLAUDE.md and .claude/settings.json after the agent exits
-    if let Some(ref setup) = session_setup {
-        crate::worktree::operations::cleanup_agent_session(&workspace.path, setup);
+    // Revert agent workspace files after the agent exits
+    if let Some(ref t) = token {
+        agent_impl.cleanup(&workspace.path, t);
     }
 
     result
