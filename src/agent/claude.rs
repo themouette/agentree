@@ -6,6 +6,10 @@ use super::Agent;
 const AGENTREE_START: &str = "<!-- agentree:start -->";
 const AGENTREE_END: &str = "<!-- agentree:end -->";
 
+/// Marker embedded in every agentree-owned hook command so that `cleanup` can
+/// identify and remove exactly these entries without touching user-defined hooks.
+const AGENTREE_HOOK_MARKER: &str = "# agentree-hook";
+
 /// Token returned by `ClaudeAgent::prepare`.
 ///
 /// Tracks whether `.claude/` was created by `prepare` so that
@@ -16,9 +20,12 @@ pub struct ClaudeToken {
 
 /// Agent implementation for Claude.
 ///
-/// `prepare` injects an `<!-- agentree:start -->` block into `CLAUDE.md`
-/// and merges `allowedTools` entries into `.claude/settings.json`.
-/// `cleanup` reverts those changes.
+/// `prepare` injects an `<!-- agentree:start -->` block into `CLAUDE.md`,
+/// merges `allowedTools` entries into `.claude/settings.json`, and injects
+/// four Claude Code hook configurations (`PreToolUse`, `PostToolUse`,
+/// `UserPromptSubmit`, `Stop`) that automate the `.agentree/attention.md`
+/// lifecycle.  Any stale `attention.md` from the prior session is also cleared.
+/// `cleanup` reverts all of those changes.
 pub struct ClaudeAgent;
 
 impl ClaudeAgent {
@@ -50,6 +57,17 @@ impl Agent for ClaudeAgent {
         let settings_path = claude_dir.join("settings.json");
         ensure_agentree_allowed_tools(&settings_path, workspace_path)?;
 
+        // Inject hook entries into settings.json (PreToolUse, PostToolUse,
+        // UserPromptSubmit, Stop) — automates attention.md lifecycle
+        ensure_agentree_hooks(&settings_path, workspace_path)?;
+
+        // Clear stale attention.md from prior session (Stop hook may have set it;
+        // new session starts fresh so the dashboard shows no stale request)
+        let attention_path = workspace_path.join(".agentree").join("attention.md");
+        if attention_path.exists() {
+            let _ = std::fs::remove_file(&attention_path);
+        }
+
         Ok(ClaudeToken { claude_dir_created })
     }
 
@@ -62,7 +80,10 @@ impl Agent for ClaudeAgent {
         // 2. Remove our entries from settings.json (delete file if now empty)
         remove_agentree_allowed_tools(&claude_dir.join("settings.json"), workspace_path);
 
-        // 3. Remove .claude/ if we created it and it is now empty
+        // 3. Remove agentree hook entries from settings.json
+        remove_agentree_hooks(&claude_dir.join("settings.json"));
+
+        // 4. Remove .claude/ if we created it and it is now empty
         if token.claude_dir_created {
             if let Ok(mut entries) = std::fs::read_dir(&claude_dir) {
                 if entries.next().is_none() {
@@ -76,6 +97,217 @@ impl Agent for ClaudeAgent {
         "claude"
     }
 }
+
+// ─── Hook command builders ────────────────────────────────────────────────────
+
+/// Build the shell command for the `PreToolUse` hook.
+///
+/// The command:
+/// 1. Saves stdin (tool JSON from Claude Code) to `$INPUT`
+/// 2. Extracts the tool name via `jq` (falls back to `"tool"` if jq is absent)
+/// 3. Extracts a brief input summary (command / path / file_path), truncated to 200 chars
+/// 4. Writes `attention.md`: first line `"Waiting for approval: <TOOL>"`, optional second
+///    line with the input summary
+/// 5. Always exits 0 — PreToolUse hooks must never block legitimate tool calls
+///
+/// The absolute `.agentree/` path is baked in so the hook works regardless of
+/// the working directory Claude Code uses when executing it.
+fn build_pretooluse_command(abs_agentree: &str) -> String {
+    format!(
+        "INPUT=$(cat); \
+TOOL=$(printf '%s' \"$INPUT\" | jq -r '.tool_name // \"tool\"' 2>/dev/null || echo \"tool\"); \
+CMD=$(printf '%s' \"$INPUT\" | jq -r '.tool_input.command // .tool_input.path // .tool_input.file_path // \"\"' 2>/dev/null | head -c 200); \
+mkdir -p \"{attn_dir}\"; \
+{{ printf 'Waiting for approval: %s\\n' \"$TOOL\"; [ -n \"$CMD\" ] && printf '%s\\n' \"$CMD\"; }} > \"{attn_dir}/attention.md\"; \
+exit 0 {marker}",
+        attn_dir = abs_agentree,
+        marker = AGENTREE_HOOK_MARKER
+    )
+}
+
+/// Build the shell command for the `Stop` hook.
+///
+/// Writes:
+/// - `attention.md`: `"Agent done\nSession ended. Review output in the right pane.\n"`
+/// - `status.json`: `{"phase":"done"}`
+///
+/// This signals the dashboard that the agent session has ended and human attention
+/// is requested.
+fn build_stop_command(abs_agentree: &str) -> String {
+    format!(
+        "mkdir -p \"{attn_dir}\"; \
+printf 'Agent done\\nSession ended. Review output in the right pane.\\n' > \"{attn_dir}/attention.md\"; \
+printf '{{\"phase\":\"done\"}}\\n' > \"{attn_dir}/status.json\" {marker}",
+        attn_dir = abs_agentree,
+        marker = AGENTREE_HOOK_MARKER
+    )
+}
+
+// ─── Hook injection / removal ────────────────────────────────────────────────
+
+/// Returns `true` if any hook entry in `group` contains [`AGENTREE_HOOK_MARKER`].
+///
+/// `group` is a single element of the per-event hook-group array in
+/// `settings.json`, e.g.:
+/// ```json
+/// { "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }
+/// ```
+fn group_has_agentree_marker(group: &serde_json::Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|h| {
+                h.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|s| s.contains(AGENTREE_HOOK_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// Ensure `.claude/settings.json` contains agentree-owned hook groups for the
+/// four lifecycle events used to automate `attention.md` management.
+///
+/// Claude Code hook format in `settings.json`:
+/// ```json
+/// {
+///   "hooks": {
+///     "PreToolUse":      [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }],
+///     "PostToolUse":     [...],
+///     "UserPromptSubmit":[...],
+///     "Stop":            [...]
+///   }
+/// }
+/// ```
+///
+/// Idempotent: existing agentree groups (identified by [`AGENTREE_HOOK_MARKER`])
+/// are not duplicated.  Pre-existing user hooks are left untouched.
+fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<()> {
+    let abs = worktree_path
+        .canonicalize()
+        .unwrap_or_else(|_| worktree_path.to_path_buf());
+    let abs_agentree = abs.join(".agentree").to_string_lossy().into_owned();
+
+    // Build command strings for each event
+    let rm_cmd = format!(
+        "rm -f \"{}/attention.md\" {}",
+        abs_agentree, AGENTREE_HOOK_MARKER
+    );
+    let hooks_to_inject: &[(&str, String)] = &[
+        ("PreToolUse", build_pretooluse_command(&abs_agentree)),
+        ("PostToolUse", rm_cmd.clone()),
+        ("UserPromptSubmit", rm_cmd.clone()),
+        ("Stop", build_stop_command(&abs_agentree)),
+    ];
+
+    // Parse existing file or start from an empty object
+    let mut value: serde_json::Value = if settings_path.exists() {
+        let raw = std::fs::read_to_string(settings_path).map_err(AgentreeError::Io)?;
+        serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Get or create `value["hooks"]` as a JSON object
+    {
+        let obj = value
+            .as_object_mut()
+            .ok_or_else(|| AgentreeError::ConfigError("settings.json root is not an object".into()))?;
+
+        let hooks_val = obj
+            .entry("hooks")
+            .or_insert(serde_json::json!({}));
+
+        if hooks_val.as_object().is_none() {
+            return Err(AgentreeError::ConfigError(
+                "settings.json hooks is not an object".into(),
+            ));
+        }
+
+        let hooks_obj = hooks_val.as_object_mut().unwrap();
+
+        for (event, command) in hooks_to_inject {
+            let groups = hooks_obj
+                .entry(*event)
+                .or_insert(serde_json::json!([]))
+                .as_array_mut()
+                .ok_or_else(|| {
+                    AgentreeError::ConfigError(format!("{event} hooks is not an array"))
+                })?;
+
+            // Idempotency: skip if an agentree group is already present
+            let already_present = groups.iter().any(group_has_agentree_marker);
+            if !already_present {
+                groups.push(serde_json::json!({
+                    "matcher": "",
+                    "hooks": [{"type": "command", "command": command}]
+                }));
+            }
+        }
+    }
+
+    let updated = serde_json::to_string_pretty(&value)?;
+    std::fs::write(settings_path, updated + "\n").map_err(AgentreeError::Io)?;
+    Ok(())
+}
+
+/// Remove agentree-owned hook groups from `.claude/settings.json`.
+///
+/// Only groups whose `command` contains [`AGENTREE_HOOK_MARKER`] are removed.
+/// User-defined hooks are never touched.
+///
+/// Non-fatal: all errors are silently ignored.
+/// Cleans up empty arrays, an empty `"hooks"` object, and the entire file if it
+/// would become `{}` after removal (matching the behaviour of
+/// `remove_agentree_allowed_tools`).
+fn remove_agentree_hooks(settings_path: &Path) {
+    if !settings_path.exists() {
+        return;
+    }
+    let raw = match std::fs::read_to_string(settings_path) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    let mut value: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let obj = match value.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+
+    if let Some(hooks_val) = obj.get_mut("hooks") {
+        if let Some(hooks_obj) = hooks_val.as_object_mut() {
+            for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+                if let Some(groups) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
+                    groups.retain(|g| !group_has_agentree_marker(g));
+                }
+            }
+            // Remove event keys whose arrays are now empty
+            hooks_obj.retain(|_, v| v.as_array().map(|a| !a.is_empty()).unwrap_or(true));
+        }
+        // Remove "hooks" key if the object is now empty
+        if hooks_val
+            .as_object()
+            .map(|o| o.is_empty())
+            .unwrap_or(false)
+        {
+            obj.remove("hooks");
+        }
+    }
+
+    if obj.is_empty() {
+        let _ = std::fs::remove_file(settings_path);
+    } else if let Ok(updated) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(settings_path, updated + "\n");
+    }
+}
+
+// ─── allowedTools helpers ────────────────────────────────────────────────────
 
 /// Ensure `.claude/settings.json` contains `allowedTools` entries for `.agentree/**`.
 ///
@@ -269,6 +501,8 @@ fn remove_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) {
 mod tests {
     use super::*;
 
+    // ─── Existing tests (migrated from Phase 8) ───────────────────────────────
+
     #[test]
     fn test_setup_creates_files_in_empty_dir() {
         let dir = tempfile::tempdir().unwrap();
@@ -384,5 +618,199 @@ mod tests {
             .filter(|v| v.as_str() == Some("Write(.agentree/**)"))
             .count();
         assert_eq!(write_count, 1);
+    }
+
+    // ─── New Phase 9 tests: hook injection ───────────────────────────────────
+
+    #[test]
+    fn test_prepare_injects_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        agent.prepare(path).unwrap();
+
+        let raw =
+            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        // "hooks" key must be a JSON object
+        let hooks = value.get("hooks").expect("hooks key missing");
+        assert!(hooks.is_object(), "hooks should be an object");
+
+        // Each of the four events must have at least one group with the marker
+        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+            let groups = hooks[*event]
+                .as_array()
+                .unwrap_or_else(|| panic!("{event} array missing"));
+            let has_agentree = groups.iter().any(group_has_agentree_marker);
+            assert!(has_agentree, "no agentree hook found for {event}");
+        }
+
+        // Stop hook must mention "Agent done"
+        let stop_groups = hooks["Stop"].as_array().unwrap();
+        let stop_cmd = stop_groups
+            .iter()
+            .flat_map(|g| g.get("hooks").and_then(|h| h.as_array()))
+            .flatten()
+            .find_map(|h| h.get("command").and_then(|c| c.as_str()))
+            .expect("Stop hook command not found");
+        assert!(
+            stop_cmd.contains("Agent done"),
+            "Stop hook command should contain 'Agent done'"
+        );
+    }
+
+    #[test]
+    fn test_prepare_hooks_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        agent.prepare(path).unwrap();
+        agent.prepare(path).unwrap(); // second call must not duplicate
+
+        let raw =
+            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        let hooks = value.get("hooks").expect("hooks key missing");
+
+        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+            let groups = hooks[*event].as_array().unwrap();
+            let agentree_count = groups.iter().filter(|g| group_has_agentree_marker(g)).count();
+            assert_eq!(
+                agentree_count, 1,
+                "expected exactly 1 agentree hook group for {event}, found {agentree_count}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cleanup_removes_hooks_preserves_user_hooks() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        // Pre-create .claude/ with a user-defined PreToolUse hook
+        let claude_dir = path.join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let user_settings = r#"{
+  "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [{ "type": "command", "command": "user-script.sh" }] }
+    ]
+  }
+}"#;
+        std::fs::write(claude_dir.join("settings.json"), user_settings).unwrap();
+
+        let token = agent.prepare(path).unwrap();
+        agent.cleanup(path, &token);
+
+        // settings.json must still exist (user hook preserved)
+        let raw = std::fs::read_to_string(claude_dir.join("settings.json"))
+            .expect("settings.json should still exist after cleanup");
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        // User group must still be present
+        let pre_groups = value["hooks"]["PreToolUse"].as_array().unwrap();
+        let user_present = pre_groups.iter().any(|g| {
+            g.get("hooks")
+                .and_then(|h| h.as_array())
+                .map(|arr| arr.iter().any(|h| h["command"] == "user-script.sh"))
+                .unwrap_or(false)
+        });
+        assert!(user_present, "user hook should be preserved after cleanup");
+
+        // No agentree hook should remain in any event
+        for event in &["PreToolUse", "PostToolUse", "UserPromptSubmit", "Stop"] {
+            if let Some(groups) = value["hooks"].get(*event).and_then(|v| v.as_array()) {
+                let agentree_present = groups.iter().any(group_has_agentree_marker);
+                assert!(
+                    !agentree_present,
+                    "agentree hook should be removed from {event} after cleanup"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_cleanup_removes_hooks_key_when_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        let token = agent.prepare(path).unwrap();
+        agent.cleanup(path, &token);
+
+        // settings.json may not exist at all (everything was created by us and removed)
+        // OR if it still exists, it must not contain a "hooks" key
+        let settings_path = path.join(".claude").join("settings.json");
+        if settings_path.exists() {
+            let raw = std::fs::read_to_string(&settings_path).unwrap();
+            let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert!(
+                value.get("hooks").is_none(),
+                "hooks key should be absent after cleanup of an empty settings.json"
+            );
+        }
+        // file not existing is also acceptable (we created .claude/ and settings.json)
+    }
+
+    #[test]
+    fn test_prepare_clears_stale_attention() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        // Create a stale attention.md from a prior session
+        let agentree_dir = path.join(".agentree");
+        std::fs::create_dir_all(&agentree_dir).unwrap();
+        std::fs::write(agentree_dir.join("attention.md"), "stale content").unwrap();
+
+        agent.prepare(path).unwrap();
+
+        assert!(
+            !agentree_dir.join("attention.md").exists(),
+            "prepare() should remove stale attention.md from prior session"
+        );
+    }
+
+    #[test]
+    fn test_hook_commands_use_absolute_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path();
+        let agent = ClaudeAgent::new();
+
+        agent.prepare(path).unwrap();
+
+        let raw =
+            std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+
+        // Get the PreToolUse command
+        let pre_groups = value["hooks"]["PreToolUse"].as_array().unwrap();
+        let pre_cmd = pre_groups
+            .iter()
+            .find(|g| group_has_agentree_marker(g))
+            .and_then(|g| g.get("hooks").and_then(|h| h.as_array()))
+            .and_then(|arr| arr.first())
+            .and_then(|h| h.get("command").and_then(|c| c.as_str()))
+            .expect("PreToolUse agentree command not found");
+
+        // The command must contain the absolute path of the temp dir
+        let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let abs_str = abs_path.to_string_lossy();
+        assert!(
+            pre_cmd.contains(abs_str.as_ref()),
+            "PreToolUse hook command should contain absolute path '{}', got: {}",
+            abs_str,
+            pre_cmd
+        );
+
+        // Must not use bare ".agentree" relative path
+        assert!(
+            !pre_cmd.contains(" .agentree/") && !pre_cmd.contains("\"./agentree"),
+            "PreToolUse hook command should not use relative .agentree path"
+        );
     }
 }
