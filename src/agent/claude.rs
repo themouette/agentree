@@ -215,15 +215,13 @@ fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<(
             AgentreeError::ConfigError("settings.json root is not an object".into())
         })?;
 
-        let hooks_val = obj.entry("hooks").or_insert(serde_json::json!({}));
-
-        if hooks_val.as_object().is_none() {
-            return Err(AgentreeError::ConfigError(
-                "settings.json hooks is not an object".into(),
-            ));
-        }
-
-        let hooks_obj = hooks_val.as_object_mut().unwrap();
+        let hooks_obj = obj
+            .entry("hooks")
+            .or_insert(serde_json::json!({}))
+            .as_object_mut()
+            .ok_or_else(|| {
+                AgentreeError::ConfigError("settings.json hooks is not an object".into())
+            })?;
 
         for (event, command) in hooks_to_inject {
             let groups = hooks_obj
