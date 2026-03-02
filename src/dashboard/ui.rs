@@ -200,11 +200,7 @@ fn run_event_loop(
                         }
                         // Ctrl+C: show confirmation footer (same as 'q')
                         (KeyModifiers::CONTROL, KeyCode::Char('c')) => {
-                            if !state.quit_pending {
-                                state.quit_pending = true;
-                            } else {
-                                state.quit_pending = false;
-                            }
+                            state.quit_pending = !state.quit_pending;
                         }
                         // Navigation
                         (_, KeyCode::Down) | (_, KeyCode::Char('j')) => state.next(),

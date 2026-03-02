@@ -1,14 +1,7 @@
 use crate::error::{AgentreeError, Result};
 use std::path::Path;
 
-use super::Agent;
-
-const AGENTREE_START: &str = "<!-- agentree:start -->";
-const AGENTREE_END: &str = "<!-- agentree:end -->";
-
-/// Marker embedded in every agentree-owned hook command so that `cleanup` can
-/// identify and remove exactly these entries without touching user-defined hooks.
-const AGENTREE_HOOK_MARKER: &str = "# agentree-hook";
+use super::{inject_agentree_block, remove_agentree_block, Agent, AGENTREE_HOOK_MARKER};
 
 /// Token returned by `ClaudeAgent::prepare`.
 ///
@@ -51,7 +44,10 @@ impl Agent for ClaudeAgent {
         }
 
         // Inject agentree block into CLAUDE.md (idempotent)
-        inject_agentree_block(&workspace_path.join("CLAUDE.md"))?;
+        inject_agentree_block(
+            &workspace_path.join("CLAUDE.md"),
+            include_str!("../../templates/CLAUDE.md"),
+        )?;
 
         // Merge our allowedTools entries into settings.json
         let settings_path = claude_dir.join("settings.json");
@@ -357,95 +353,6 @@ fn ensure_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) -> 
     Ok(())
 }
 
-/// Inject the agentree CLAUDE.md block into `path`.
-///
-/// The content is wrapped in XML markers so it can be cleanly extracted later:
-/// ```text
-/// <!-- agentree:start -->
-/// <template content>
-/// <!-- agentree:end -->
-/// ```
-///
-/// Idempotent: if `<!-- agentree:start -->` is already present, does nothing.
-/// Appends to an existing file; creates the file if it does not exist.
-fn inject_agentree_block(path: &Path) -> Result<()> {
-    let template = include_str!("../../templates/CLAUDE.md");
-    let block = format!("{}\n{}{}\n", AGENTREE_START, template, AGENTREE_END);
-
-    if path.exists() {
-        let content = std::fs::read_to_string(path).map_err(AgentreeError::Io)?;
-        if content.contains(AGENTREE_START) {
-            return Ok(()); // already injected
-        }
-        let separator = if content.ends_with('\n') {
-            "\n"
-        } else {
-            "\n\n"
-        };
-        std::fs::write(path, format!("{}{}{}", content, separator, block))
-            .map_err(AgentreeError::Io)?;
-    } else {
-        std::fs::write(path, &block).map_err(AgentreeError::Io)?;
-    }
-    Ok(())
-}
-
-/// Remove the `<!-- agentree:start -->…<!-- agentree:end -->` block from `path`.
-///
-/// Non-fatal: all errors are silently ignored.
-/// Deletes the file if it becomes empty (only whitespace) after removal.
-fn remove_agentree_block(path: &Path) {
-    if !path.exists() {
-        return;
-    }
-    let content = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(_) => return,
-    };
-
-    let start_pos = match content.find(AGENTREE_START) {
-        Some(p) => p,
-        None => return,
-    };
-    let end_pos = match content.find(AGENTREE_END) {
-        Some(p) => p,
-        None => return,
-    };
-
-    // Byte offset just past `<!-- agentree:end -->`, skipping one trailing newline
-    let end_byte = end_pos + AGENTREE_END.len();
-    let end_byte = if content.as_bytes().get(end_byte) == Some(&b'\n') {
-        end_byte + 1
-    } else {
-        end_byte
-    };
-
-    let before = &content[..start_pos];
-    let after = &content[end_byte..];
-
-    let remaining = match (before.trim().is_empty(), after.trim().is_empty()) {
-        (true, true) => String::new(),
-        (true, false) => after.trim_start_matches('\n').to_string(),
-        (false, true) => format!("{}\n", before.trim_end_matches('\n')),
-        (false, false) => format!(
-            "{}\n{}",
-            before.trim_end_matches('\n'),
-            after.trim_start_matches('\n')
-        ),
-    };
-
-    if remaining.trim().is_empty() {
-        let _ = std::fs::remove_file(path);
-    } else {
-        let final_content = if remaining.ends_with('\n') {
-            remaining
-        } else {
-            remaining + "\n"
-        };
-        let _ = std::fs::write(path, final_content);
-    }
-}
-
 /// Remove agentree's `allowedTools` entries from `.claude/settings.json`.
 ///
 /// Non-fatal: all errors are silently ignored.
@@ -497,6 +404,7 @@ fn remove_agentree_allowed_tools(settings_path: &Path, worktree_path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::{AGENTREE_END, AGENTREE_START};
 
     // ─── Existing tests (migrated from Phase 8) ───────────────────────────────
 
