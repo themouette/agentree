@@ -15,9 +15,10 @@ pub struct ClaudeToken {
 ///
 /// `prepare` injects an `<!-- agentree:start -->` block into `CLAUDE.md`,
 /// merges `allowedTools` entries into `.claude/settings.json`, and injects
-/// three Claude Code hook configurations (`Notification`, `UserPromptSubmit`,
-/// `Stop`) that automate the `.agentree/attention.md` lifecycle.  Any stale
-/// `attention.md` from the prior session is also cleared.
+/// five Claude Code hook configurations (`Notification`, `PostToolUse`,
+/// `PostToolUseFailure`, `UserPromptSubmit`, `Stop`) that automate the
+/// `.agentree/attention.md` lifecycle.  Any stale `attention.md` from the
+/// prior session is also cleared.
 /// `cleanup` reverts all of those changes.
 pub struct ClaudeAgent;
 
@@ -53,8 +54,8 @@ impl Agent for ClaudeAgent {
         let settings_path = claude_dir.join("settings.json");
         ensure_agentree_allowed_tools(&settings_path, workspace_path)?;
 
-        // Inject hook entries into settings.json (Notification,
-        // UserPromptSubmit, Stop) — automates attention.md lifecycle
+        // Inject hook entries into settings.json (Notification, PostToolUse,
+        // PostToolUseFailure, UserPromptSubmit, Stop) — automates attention.md lifecycle
         ensure_agentree_hooks(&settings_path, workspace_path)?;
 
         // Clear stale attention.md from prior session (Stop hook may have set it;
@@ -166,15 +167,17 @@ fn group_has_agentree_marker(group: &serde_json::Value) -> bool {
 }
 
 /// Ensure `.claude/settings.json` contains agentree-owned hook groups for the
-/// three lifecycle events used to automate `attention.md` management.
+/// five lifecycle events used to automate `attention.md` management.
 ///
 /// Claude Code hook format in `settings.json`:
 /// ```json
 /// {
 ///   "hooks": {
-///     "Notification":    [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }],
-///     "UserPromptSubmit":[...],
-///     "Stop":            [...]
+///     "Notification":     [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }],
+///     "PostToolUse":      [...],
+///     "PostToolUseFailure":[...],
+///     "UserPromptSubmit": [...],
+///     "Stop":             [...]
 ///   }
 /// }
 /// ```
@@ -194,6 +197,8 @@ fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<(
     );
     let hooks_to_inject: &[(&str, String)] = &[
         ("Notification", build_notification_command(&abs_agentree)),
+        ("PostToolUse", rm_cmd.clone()),
+        ("PostToolUseFailure", rm_cmd.clone()),
         ("UserPromptSubmit", rm_cmd.clone()),
         ("Stop", build_stop_command(&abs_agentree)),
     ];
@@ -274,7 +279,13 @@ fn remove_agentree_hooks(settings_path: &Path) {
 
     if let Some(hooks_val) = obj.get_mut("hooks") {
         if let Some(hooks_obj) = hooks_val.as_object_mut() {
-            for event in &["Notification", "UserPromptSubmit", "Stop"] {
+            for event in &[
+                "Notification",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "UserPromptSubmit",
+                "Stop",
+            ] {
                 if let Some(groups) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
                     groups.retain(|g| !group_has_agentree_marker(g));
                 }
@@ -537,8 +548,14 @@ mod tests {
         let hooks = value.get("hooks").expect("hooks key missing");
         assert!(hooks.is_object(), "hooks should be an object");
 
-        // Each of the three events must have at least one group with the marker
-        for event in &["Notification", "UserPromptSubmit", "Stop"] {
+        // Each of the five events must have at least one group with the marker
+        for event in &[
+            "Notification",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             let groups = hooks[*event]
                 .as_array()
                 .unwrap_or_else(|| panic!("{event} array missing"));
@@ -594,7 +611,13 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let hooks = value.get("hooks").expect("hooks key missing");
 
-        for event in &["Notification", "UserPromptSubmit", "Stop"] {
+        for event in &[
+            "Notification",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             let groups = hooks[*event].as_array().unwrap();
             let agentree_count = groups
                 .iter()
@@ -644,7 +667,13 @@ mod tests {
         assert!(user_present, "user hook should be preserved after cleanup");
 
         // No agentree hook should remain in any event
-        for event in &["Notification", "UserPromptSubmit", "Stop"] {
+        for event in &[
+            "Notification",
+            "PostToolUse",
+            "PostToolUseFailure",
+            "UserPromptSubmit",
+            "Stop",
+        ] {
             if let Some(groups) = value["hooks"].get(*event).and_then(|v| v.as_array()) {
                 let agentree_present = groups.iter().any(group_has_agentree_marker);
                 assert!(
