@@ -15,9 +15,9 @@ pub struct ClaudeToken {
 ///
 /// `prepare` injects an `<!-- agentree:start -->` block into `CLAUDE.md`,
 /// merges `allowedTools` entries into `.claude/settings.json`, and injects
-/// four Claude Code hook configurations (`PreToolUse`, `PostToolUse`,
-/// `UserPromptSubmit`, `Stop`) that automate the `.agentree/attention.md`
-/// lifecycle.  Any stale `attention.md` from the prior session is also cleared.
+/// three Claude Code hook configurations (`Notification`, `UserPromptSubmit`,
+/// `Stop`) that automate the `.agentree/attention.md` lifecycle.  Any stale
+/// `attention.md` from the prior session is also cleared.
 /// `cleanup` reverts all of those changes.
 pub struct ClaudeAgent;
 
@@ -53,7 +53,7 @@ impl Agent for ClaudeAgent {
         let settings_path = claude_dir.join("settings.json");
         ensure_agentree_allowed_tools(&settings_path, workspace_path)?;
 
-        // Inject hook entries into settings.json (PreToolUse, PostToolUse,
+        // Inject hook entries into settings.json (Notification,
         // UserPromptSubmit, Stop) — automates attention.md lifecycle
         ensure_agentree_hooks(&settings_path, workspace_path)?;
 
@@ -96,19 +96,20 @@ impl Agent for ClaudeAgent {
 
 // ─── Hook command builders ────────────────────────────────────────────────────
 
-/// Build the shell command for the `PreToolUse` hook.
+/// Build the shell command for the `Notification` hook.
 ///
 /// The command:
-/// 1. Saves stdin (tool JSON from Claude Code) to `$INPUT`
-/// 2. Extracts the tool name via `jq` (falls back to `"tool"` if jq is absent)
-/// 3. Extracts a brief input summary (command / path / file_path), truncated to 200 chars
-/// 4. Writes `attention.md`: first line `"Waiting for approval: <TOOL>"`, optional second
-///    line with the input summary
-/// 5. Always exits 0 — PreToolUse hooks must never block legitimate tool calls
+/// 1. Saves stdin (notification JSON from Claude Code) to `$INPUT`
+/// 2. Extracts `.message` via `jq` (falls back to `"Claude needs your attention"`)
+/// 3. Writes `attention.md` with the notification message
+///
+/// The `Notification` hook fires only when Claude Code would send a real system
+/// notification (permission prompts, idle prompts, etc.) — not on every tool
+/// call.  Exit code is irrelevant for `Notification` hooks; we do not emit one.
 ///
 /// The absolute `.agentree/` path is baked in so the hook works regardless of
 /// the working directory Claude Code uses when executing it.
-fn build_pretooluse_command(abs_agentree: &str) -> String {
+fn build_notification_command(abs_agentree: &str) -> String {
     // `abs_agentree` is wrapped in double-quotes in the shell command.
     // This is safe for paths with spaces, but would break for paths containing
     // a literal `"` character.  Such paths are valid on Linux/macOS but
@@ -116,11 +117,10 @@ fn build_pretooluse_command(abs_agentree: &str) -> String {
     // adding a heavyweight escaping step.
     format!(
         "INPUT=$(cat); \
-TOOL=$(printf '%s' \"$INPUT\" | jq -r '.tool_name // \"tool\"' 2>/dev/null || echo \"tool\"); \
-CMD=$(printf '%s' \"$INPUT\" | jq -r '.tool_input.command // .tool_input.path // .tool_input.file_path // \"\"' 2>/dev/null | head -c 200); \
+MSG=$(printf '%s' \"$INPUT\" | jq -r '.message // \"Claude needs your attention\"' 2>/dev/null \
+|| echo \"Claude needs your attention\"); \
 mkdir -p \"{attn_dir}\"; \
-{{ printf 'Waiting for approval: %s\\n' \"$TOOL\"; [ -n \"$CMD\" ] && printf '%s\\n' \"$CMD\"; }} > \"{attn_dir}/attention.md\"; \
-exit 0 {marker}",
+printf '%s\\n' \"$MSG\" > \"{attn_dir}/attention.md\" {marker}",
         attn_dir = abs_agentree,
         marker = AGENTREE_HOOK_MARKER
     )
@@ -132,7 +132,7 @@ exit 0 {marker}",
 /// agent session has ended. Does not write `attention.md` — the session end
 /// is a status update, not an attention request.
 fn build_stop_command(abs_agentree: &str) -> String {
-    // Same double-quote assumption as `build_pretooluse_command`.
+    // Same double-quote assumption as `build_notification_command`.
     format!(
         "mkdir -p \"{attn_dir}\"; \
 printf '{{\"phase\":\"done\"}}\\n' > \"{attn_dir}/status.json\" {marker}",
@@ -166,14 +166,13 @@ fn group_has_agentree_marker(group: &serde_json::Value) -> bool {
 }
 
 /// Ensure `.claude/settings.json` contains agentree-owned hook groups for the
-/// four lifecycle events used to automate `attention.md` management.
+/// three lifecycle events used to automate `attention.md` management.
 ///
 /// Claude Code hook format in `settings.json`:
 /// ```json
 /// {
 ///   "hooks": {
-///     "PreToolUse":      [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }],
-///     "PostToolUse":     [...],
+///     "Notification":    [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }],
 ///     "UserPromptSubmit":[...],
 ///     "Stop":            [...]
 ///   }
@@ -194,9 +193,7 @@ fn ensure_agentree_hooks(settings_path: &Path, worktree_path: &Path) -> Result<(
         abs_agentree, AGENTREE_HOOK_MARKER
     );
     let hooks_to_inject: &[(&str, String)] = &[
-        ("PreToolUse", build_pretooluse_command(&abs_agentree)),
-        ("PostToolUse", rm_cmd.clone()),
-        ("PostToolUseFailure", rm_cmd.clone()),
+        ("Notification", build_notification_command(&abs_agentree)),
         ("UserPromptSubmit", rm_cmd.clone()),
         ("Stop", build_stop_command(&abs_agentree)),
     ];
@@ -277,13 +274,7 @@ fn remove_agentree_hooks(settings_path: &Path) {
 
     if let Some(hooks_val) = obj.get_mut("hooks") {
         if let Some(hooks_obj) = hooks_val.as_object_mut() {
-            for event in &[
-                "PreToolUse",
-                "PostToolUse",
-                "PostToolUseFailure",
-                "UserPromptSubmit",
-                "Stop",
-            ] {
+            for event in &["Notification", "UserPromptSubmit", "Stop"] {
                 if let Some(groups) = hooks_obj.get_mut(*event).and_then(|v| v.as_array_mut()) {
                     groups.retain(|g| !group_has_agentree_marker(g));
                 }
@@ -546,20 +537,31 @@ mod tests {
         let hooks = value.get("hooks").expect("hooks key missing");
         assert!(hooks.is_object(), "hooks should be an object");
 
-        // Each of the five events must have at least one group with the marker
-        for event in &[
-            "PreToolUse",
-            "PostToolUse",
-            "PostToolUseFailure",
-            "UserPromptSubmit",
-            "Stop",
-        ] {
+        // Each of the three events must have at least one group with the marker
+        for event in &["Notification", "UserPromptSubmit", "Stop"] {
             let groups = hooks[*event]
                 .as_array()
                 .unwrap_or_else(|| panic!("{event} array missing"));
             let has_agentree = groups.iter().any(group_has_agentree_marker);
             assert!(has_agentree, "no agentree hook found for {event}");
         }
+
+        // Notification hook must write attention.md with the message
+        let notif_groups = hooks["Notification"].as_array().unwrap();
+        let notif_cmd = notif_groups
+            .iter()
+            .flat_map(|g| g.get("hooks").and_then(|h| h.as_array()))
+            .flatten()
+            .find_map(|h| h.get("command").and_then(|c| c.as_str()))
+            .expect("Notification hook command not found");
+        assert!(
+            notif_cmd.contains("attention.md"),
+            "Notification hook command should write attention.md"
+        );
+        assert!(
+            notif_cmd.contains(".message"),
+            "Notification hook command should read .message from stdin"
+        );
 
         // Stop hook must update status.json with phase done
         let stop_groups = hooks["Stop"].as_array().unwrap();
@@ -592,13 +594,7 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let hooks = value.get("hooks").expect("hooks key missing");
 
-        for event in &[
-            "PreToolUse",
-            "PostToolUse",
-            "PostToolUseFailure",
-            "UserPromptSubmit",
-            "Stop",
-        ] {
+        for event in &["Notification", "UserPromptSubmit", "Stop"] {
             let groups = hooks[*event].as_array().unwrap();
             let agentree_count = groups
                 .iter()
@@ -617,12 +613,12 @@ mod tests {
         let path = dir.path();
         let agent = ClaudeAgent::new();
 
-        // Pre-create .claude/ with a user-defined PreToolUse hook
+        // Pre-create .claude/ with a user-defined Notification hook
         let claude_dir = path.join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
         let user_settings = r#"{
   "hooks": {
-    "PreToolUse": [
+    "Notification": [
       { "matcher": "Bash", "hooks": [{ "type": "command", "command": "user-script.sh" }] }
     ]
   }
@@ -638,8 +634,8 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
         // User group must still be present
-        let pre_groups = value["hooks"]["PreToolUse"].as_array().unwrap();
-        let user_present = pre_groups.iter().any(|g| {
+        let notif_groups = value["hooks"]["Notification"].as_array().unwrap();
+        let user_present = notif_groups.iter().any(|g| {
             g.get("hooks")
                 .and_then(|h| h.as_array())
                 .map(|arr| arr.iter().any(|h| h["command"] == "user-script.sh"))
@@ -648,13 +644,7 @@ mod tests {
         assert!(user_present, "user hook should be preserved after cleanup");
 
         // No agentree hook should remain in any event
-        for event in &[
-            "PreToolUse",
-            "PostToolUse",
-            "PostToolUseFailure",
-            "UserPromptSubmit",
-            "Stop",
-        ] {
+        for event in &["Notification", "UserPromptSubmit", "Stop"] {
             if let Some(groups) = value["hooks"].get(*event).and_then(|v| v.as_array()) {
                 let agentree_present = groups.iter().any(group_has_agentree_marker);
                 assert!(
@@ -718,30 +708,30 @@ mod tests {
         let raw = std::fs::read_to_string(path.join(".claude").join("settings.json")).unwrap();
         let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
-        // Get the PreToolUse command
-        let pre_groups = value["hooks"]["PreToolUse"].as_array().unwrap();
-        let pre_cmd = pre_groups
+        // Get the Notification command
+        let notif_groups = value["hooks"]["Notification"].as_array().unwrap();
+        let notif_cmd = notif_groups
             .iter()
             .find(|g| group_has_agentree_marker(g))
             .and_then(|g| g.get("hooks").and_then(|h| h.as_array()))
             .and_then(|arr| arr.first())
             .and_then(|h| h.get("command").and_then(|c| c.as_str()))
-            .expect("PreToolUse agentree command not found");
+            .expect("Notification agentree command not found");
 
         // The command must contain the absolute path of the temp dir
         let abs_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let abs_str = abs_path.to_string_lossy();
         assert!(
-            pre_cmd.contains(abs_str.as_ref()),
-            "PreToolUse hook command should contain absolute path '{}', got: {}",
+            notif_cmd.contains(abs_str.as_ref()),
+            "Notification hook command should contain absolute path '{}', got: {}",
             abs_str,
-            pre_cmd
+            notif_cmd
         );
 
         // Must not use bare ".agentree" relative path
         assert!(
-            !pre_cmd.contains(" .agentree/") && !pre_cmd.contains("\"./agentree"),
-            "PreToolUse hook command should not use relative .agentree path"
+            !notif_cmd.contains(" .agentree/") && !notif_cmd.contains("\"./agentree"),
+            "Notification hook command should not use relative .agentree path"
         );
     }
 }
