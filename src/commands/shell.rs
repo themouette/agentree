@@ -22,15 +22,14 @@ pub fn execute(args: ShellArgs) -> Result<()> {
     // Ensure workspace exists (create or resume) and set up metadata
     let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
 
+    // Determine backend: prefer metadata backend over config default when resuming
+    let backend_kind = ctx.effective_backend_for(&workspace, args.workspace.backend.is_some());
+
     // Print welcome banner before opening shell
-    print_welcome_banner(
-        &args.workspace.branch,
-        &workspace.path,
-        &ctx.config.effective_backend(),
-    );
+    print_welcome_banner(&args.workspace.branch, &workspace.path, &backend_kind);
 
     // Create backend and open shell (respects backend isolation per BACK-07)
-    let backend = BackendType::from_kind(ctx.config.effective_backend());
+    let backend = BackendType::from_kind(backend_kind);
     backend.shell(&workspace.path)?;
 
     Ok(())

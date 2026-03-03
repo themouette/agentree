@@ -27,8 +27,14 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         None,
     )?;
 
-    // Determine which backend we're using
-    let backend_kind = ctx.config.effective_backend();
+    // Ensure workspace exists (create or resume) and set up metadata
+    let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
+
+    // Determine which backend we're using.
+    // Priority: CLI --backend flag > workspace metadata (creation-time backend) > config default.
+    // Reading metadata ensures that a workspace created with e.g. `--backend local` continues
+    // to use the local backend even when the global/project config defaults to another backend.
+    let backend_kind = ctx.effective_backend_for(&workspace, args.workspace.backend.is_some());
 
     // Determine the logical agent name for trait dispatch.
     // ClaudeVm with no explicit agent still defaults to "claude" so that
@@ -65,9 +71,6 @@ pub fn execute(args: AgentArgs) -> Result<()> {
     let mut all_flags = default_args;
     all_flags.extend(args.flags);
 
-    // Ensure workspace exists (create or resume) and set up metadata
-    let workspace = ctx.ensure_workspace(&args.workspace.branch, args.workspace.base.as_deref())?;
-
     // Prepare agent workspace files (e.g. CLAUDE.md injection, settings.json allowedTools)
     let agent_impl = AgentType::from_name(agent_logical_name);
     let token = agent_impl
@@ -76,7 +79,7 @@ pub fn execute(args: AgentArgs) -> Result<()> {
         .ok();
 
     // Agent respects backend isolation (BACK-09)
-    let backend = BackendType::from_kind(ctx.config.effective_backend());
+    let backend = BackendType::from_kind(backend_kind);
     let result = backend.agent(&workspace.path, agent_bin.as_deref(), &all_flags);
 
     // Revert agent workspace files after the agent exits
