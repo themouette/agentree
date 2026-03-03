@@ -805,5 +805,4 @@ mod tests {
             assert_returns_create_result(ensure_workspace);
         }
     }
-
 }
