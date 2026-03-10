@@ -126,6 +126,66 @@ impl ForceLevel {
     }
 }
 
+/// Resolve the git common directory for a worktree using `git rev-parse`.
+///
+/// Runs `git -C worktree_path rev-parse --git-common-dir` and canonicalizes
+/// the result (which may be relative to `worktree_path`).
+fn resolve_git_common_dir(worktree_path: &Path) -> Result<PathBuf> {
+    let output = std::process::Command::new("git")
+        .arg("-C")
+        .arg(worktree_path)
+        .args(["rev-parse", "--git-common-dir"])
+        .output()
+        .map_err(|e| AgentreeError::Git(format!("Failed to run git: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(AgentreeError::Git(
+            "git rev-parse --git-common-dir failed".to_string(),
+        ));
+    }
+
+    let common_dir_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let common_dir = PathBuf::from(&common_dir_str);
+
+    // git may output a relative path (relative to the worktree directory)
+    let resolved = if common_dir.is_absolute() {
+        common_dir
+    } else {
+        worktree_path.join(common_dir)
+    };
+
+    resolved.canonicalize().map_err(AgentreeError::Io)
+}
+
+/// Add `.agentree/` to the shared git `info/exclude` file so it is not tracked.
+///
+/// Resolves `$GIT_COMMON_DIR` via `git rev-parse --git-common-dir`, then appends
+/// `.agentree/` to `$GIT_COMMON_DIR/info/exclude` if not already present.
+fn add_agentree_to_git_exclude(worktree_path: &Path) -> Result<()> {
+    let common_dir = resolve_git_common_dir(worktree_path)?;
+
+    // Ensure info/ directory exists
+    let info_dir = common_dir.join("info");
+    std::fs::create_dir_all(&info_dir).map_err(AgentreeError::Io)?;
+
+    // Read existing exclude file content
+    let exclude_path = info_dir.join("exclude");
+    let existing = std::fs::read_to_string(&exclude_path).unwrap_or_default();
+
+    // Append if not already present
+    if !existing.lines().any(|line| line.trim() == ".agentree/") {
+        let append = if existing.ends_with('\n') || existing.is_empty() {
+            "# agentree status directory (local, not committed)\n.agentree/\n".to_string()
+        } else {
+            "\n# agentree status directory (local, not committed)\n.agentree/\n".to_string()
+        };
+        std::fs::write(&exclude_path, format!("{}{}", existing, append))
+            .map_err(AgentreeError::Io)?;
+    }
+
+    Ok(())
+}
+
 /// Remove an orphaned worktree directory if it exists
 ///
 /// An orphaned directory is one that exists on disk but is not tracked by git
@@ -332,6 +392,14 @@ pub fn create_worktree(
             run_git_command_no_timeout(&["worktree", "add", path_str, branch], "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
 
+            // Create .agentree/ and register with git exclude (non-critical)
+            if let Err(e) = std::fs::create_dir_all(worktree_path.join(".agentree")) {
+                eprintln!("Warning: could not create .agentree/ directory: {}", e);
+            }
+            if let Err(e) = add_agentree_to_git_exclude(&worktree_path) {
+                eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
+            }
+
             Ok(if is_remote_checkout {
                 CreateResult::CheckedOutFromRemote(worktree_path)
             } else {
@@ -362,6 +430,14 @@ pub fn create_worktree(
 
             run_git_command_no_timeout(&args, "create worktree")
                 .map_err(|e| improve_worktree_add_error(e, branch))?;
+
+            // Create .agentree/ and register with git exclude (non-critical)
+            if let Err(e) = std::fs::create_dir_all(worktree_path.join(".agentree")) {
+                eprintln!("Warning: could not create .agentree/ directory: {}", e);
+            }
+            if let Err(e) = add_agentree_to_git_exclude(&worktree_path) {
+                eprintln!("Warning: could not add .agentree/ to git exclude: {}", e);
+            }
 
             Ok(CreateResult::CreatedWithBranch(worktree_path))
         }
@@ -432,10 +508,8 @@ pub fn delete_worktree(branch: &str, force_level: ForceLevel, unlock: bool) -> R
     // Build git command with appropriate force flags
     let mut args = vec!["worktree", "remove"];
 
-    // Add force flags based on level (compatible with older Rust versions)
-    // Note: Using repeat().take() instead of repeat_n() for broader Rust version compatibility
-    #[allow(clippy::manual_repeat_n)]
-    args.extend(std::iter::repeat("--force").take(force_level.flag_count()));
+    // Add force flags based on level
+    args.extend(std::iter::repeat_n("--force", force_level.flag_count()));
 
     args.push(&path_str);
 

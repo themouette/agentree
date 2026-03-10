@@ -1,7 +1,7 @@
 use crate::error::{AgentreeError, Result};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 mod claude_vm;
@@ -74,6 +74,21 @@ pub trait Backend {
 
     /// Get the backend name
     fn name(&self) -> &str;
+
+    /// Returns the path to the status directory for a given workspace.
+    ///
+    /// The daemon watches this directory for `status.json` and `attention.md`
+    /// written by agents to report their current state.
+    ///
+    /// Default implementation returns `workspace_path/.agentree/`.
+    /// Backends with broader filesystem access may override to return a
+    /// central path (e.g. `~/.agentree/workspaces/{branch}/`).
+    ///
+    /// Per design decision: daemon calls this method when determining what
+    /// paths to watch — not hardcoded to worktree path.
+    fn status_dir(&self, workspace_path: &Path) -> PathBuf {
+        workspace_path.join(".agentree")
+    }
 }
 
 /// Concrete backend implementation dispatcher

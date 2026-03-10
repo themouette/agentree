@@ -1,0 +1,240 @@
+pub mod client;
+pub mod tmux;
+pub mod ui;
+
+use crate::daemon;
+use crate::dashboard::client::{try_connect, DaemonClient};
+use crate::dashboard::tmux as tmux_util;
+use crate::error::{AgentreeError, Result};
+use crate::utils::git::get_git_root;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+pub const DASHBOARD_SESSION: &str = "agentree-dashboard";
+const DAEMON_START_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Entry point for `agentree dashboard`
+pub fn execute(tui_mode: bool) -> Result<()> {
+    let sock_path = daemon::socket_path().ok_or_else(|| {
+        AgentreeError::DaemonError("Could not determine home directory".to_string())
+    })?;
+
+    if tui_mode {
+        // We are the TUI process running inside the left pane.
+        // Check if this session started the daemon (communicated via env var from parent).
+        let started_daemon = std::env::var("AGENTREE_STARTED_DAEMON").is_ok();
+        let client = DaemonClient::new(&sock_path)?;
+        return ui::run_tui(client, started_daemon);
+    }
+
+    // Check if already inside a tmux session and warn the user
+    if std::env::var("TMUX").is_ok() {
+        eprint!("You are already inside tmux. Nest? [y/N] ");
+        use std::io::BufRead;
+        let mut line = String::new();
+        let stdin = std::io::stdin();
+        stdin.lock().read_line(&mut line).ok();
+        let answer = line.trim().to_lowercase();
+        if answer != "y" && answer != "yes" {
+            return Ok(()); // User said no — exit cleanly
+        }
+        // User said yes — proceed with nesting
+    }
+
+    // Ensure tmux is installed
+    if !tmux_util::is_available() {
+        return Err(AgentreeError::TmuxNotFound);
+    }
+
+    // Detect repo root for daemon startup
+    let repo_root = get_git_root()?
+        .ok_or_else(|| AgentreeError::DaemonError("Not inside a git repository".to_string()))?;
+
+    // Ensure the daemon is running; track whether we started it
+    let started_daemon = ensure_daemon(&sock_path, &repo_root)?;
+
+    // Compute the agentree binary path once (used in both session paths)
+    let agentree_bin = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("agentree"))
+        .to_string_lossy()
+        .to_string();
+    // Pass started_daemon info to the TUI process via env var
+    let tui_cmd = if started_daemon {
+        format!("AGENTREE_STARTED_DAEMON=1 {} dashboard --tui", agentree_bin)
+    } else {
+        format!("{} dashboard --tui", agentree_bin)
+    };
+
+    if tmux_util::session_exists(DASHBOARD_SESSION) {
+        // Session exists — check if TUI pane (pane 0) is dead and relaunch if needed
+        if tmux_util::is_tui_pane_dead(DASHBOARD_SESSION) {
+            tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;
+        }
+        // Silently attach (no output per CONTEXT.md design)
+        return tmux_util::attach(DASHBOARD_SESSION);
+    }
+
+    // Session does not exist — create it
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".to_string());
+    tmux_util::create_session(DASHBOARD_SESSION, &shell, &repo_root)?;
+
+    // Hide the tmux status bar — users should not see the window list (implementation detail)
+    tmux_util::disable_status_bar(DASHBOARD_SESSION);
+
+    // Enable focus-events so the TUI receives FocusLost/FocusGained when the
+    // user switches panes. tmux disables this by default.
+    tmux_util::enable_focus_events();
+
+    // Split into two horizontal panes
+    tmux_util::split_horizontal(DASHBOARD_SESSION)?;
+
+    // Enable pane-border-status so the right pane shows its display title
+    tmux_util::setup_pane_border_status(DASHBOARD_SESSION);
+
+    // Note: resize_pane(0, 44) is NOT called here — the session is still detached
+    // so tmux doesn't know the real terminal width. The TUI resizes itself to 44 cols
+    // on the first Event::Resize it receives (which fires when the client attaches).
+
+    // Start TUI in the left pane
+    tmux_util::respawn_pane(DASHBOARD_SESSION, 0, &tui_cmd)?;
+
+    // Bind Ctrl+\ to return to left pane
+    tmux_util::bind_key_return_to_dashboard(DASHBOARD_SESSION);
+
+    // Select left pane initially
+    tmux_util::select_pane(DASHBOARD_SESSION, 0)?;
+
+    // Show welcome panel in the right content area on initial open
+    // Must happen before attach() since attach() replaces the current process
+    tmux_util::show_welcome_panel(DASHBOARD_SESSION);
+
+    // Attach to the session (replaces current process)
+    tmux_util::attach(DASHBOARD_SESSION)
+}
+
+/// Kill the dashboard tmux session and stop the daemon.
+/// Safe to call even if the session or daemon is not running.
+pub fn kill_dashboard() -> Result<()> {
+    // 1. Kill the tmux session (noop if not running)
+    let session_was_running = tmux_util::session_exists(DASHBOARD_SESSION);
+    tmux_util::kill_session(DASHBOARD_SESSION)?;
+    if session_was_running {
+        eprintln!("Dashboard session '{}' killed.", DASHBOARD_SESSION);
+    } else {
+        eprintln!("No dashboard session running.");
+    }
+
+    // 2. Stop the daemon via SIGTERM to the PID recorded in the PID file
+    let sock_path = daemon::socket_path().ok_or_else(|| {
+        AgentreeError::DaemonError("Could not determine home directory".to_string())
+    })?;
+
+    let pid_path = daemon::runtime_dir().map(|d| d.join("daemon.pid"));
+
+    if let Some(pid_path) = pid_path {
+        if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                // Send SIGTERM to daemon process
+                #[cfg(unix)]
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .status();
+                // Give daemon time to clean up socket and PID file
+                std::thread::sleep(Duration::from_millis(500));
+                // Report whether daemon stopped
+                if !try_connect(&sock_path) {
+                    eprintln!("Daemon stopped.");
+                } else {
+                    eprintln!(
+                        "Warning: daemon may still be running. Check: agentree daemon --status"
+                    );
+                }
+            } else {
+                eprintln!("No daemon PID found — daemon may not be running.");
+            }
+        } else {
+            eprintln!("No daemon PID file found — daemon may not be running.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Ensure the daemon is running, starting it if necessary.
+///
+/// Returns `Ok(true)` if this call started the daemon, `Ok(false)` if it was already running.
+///
+/// Progress display is TTY-aware:
+/// - Interactive terminal: spinner + "Starting agentree daemon..." (cleared on success)
+/// - Non-TTY (piped / CI): prints "Starting agentree daemon..." once, then polls silently
+///
+/// On timeout, returns DaemonStartFailed with the log file path.
+fn ensure_daemon(sock_path: &Path, repo_root: &Path) -> Result<bool> {
+    if try_connect(sock_path) {
+        return Ok(false);
+    }
+
+    // Determine log path for error messages
+    let log_path = crate::daemon::runtime_dir()
+        .map(|d| d.join("daemon.log"))
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "~/.agentree/daemon.log".to_string());
+
+    // Spawn the daemon in the background
+    // Note: stdout/stderr are intentionally left as null here. The daemon itself
+    // redirects its output to daemon.log via init_logging() in commands/daemon.rs.
+    let agentree_bin = std::env::current_exe()
+        .unwrap_or_else(|_| PathBuf::from("agentree"))
+        .to_string_lossy()
+        .to_string();
+
+    // TOCTOU note: two simultaneous dashboard invocations may both spawn a daemon.
+    // The second daemon will fail to bind the socket; both will connect to the first.
+    std::process::Command::new(&agentree_bin)
+        .arg("daemon")
+        .arg("--repo-root")
+        .arg(repo_root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| AgentreeError::DaemonError(format!("Failed to spawn daemon: {}", e)))?;
+
+    // TTY-aware progress display
+    let spinner: Option<ProgressBar> = if std::io::stderr().is_terminal() {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.cyan} {msg}")
+                .expect("valid template"),
+        );
+        pb.set_message("Starting agentree daemon...");
+        pb.enable_steady_tick(std::time::Duration::from_millis(80));
+        Some(pb)
+    } else {
+        // No TTY: print static line once, then poll silently
+        eprintln!("Starting agentree daemon...");
+        None
+    };
+
+    // Poll for socket (5s timeout, 50ms interval)
+    let deadline = Instant::now() + DAEMON_START_TIMEOUT;
+    while Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+        if try_connect(sock_path) {
+            if let Some(pb) = spinner {
+                pb.finish_and_clear();
+            }
+            return Ok(true);
+        }
+    }
+
+    // Timeout: clear spinner, return actionable error
+    if let Some(pb) = spinner {
+        pb.finish_and_clear();
+    }
+
+    Err(AgentreeError::DaemonStartFailed { log_path })
+}

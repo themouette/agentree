@@ -97,6 +97,9 @@ pub enum AgentreeError {
     #[error("Failed to check for updates: {0}")]
     UpdateCheckFailed(String),
 
+    #[error("Daemon error: {0}")]
+    DaemonError(String),
+
     #[error("Docker daemon is not running. Please start Docker Desktop and try again.\nCheck status with: docker info")]
     DockerNotRunning,
 
@@ -112,6 +115,20 @@ pub enum AgentreeError {
 
     #[error("Docker sandbox '{name}' not found.\nThe sandbox may have been removed outside of agentree.\nTry running: agentree remove {branch} && agentree create {branch}")]
     SandboxNotFound { name: String, branch: String },
+
+    #[error("tmux is not installed. Install it with: brew install tmux (macOS) or apt install tmux (Linux)")]
+    TmuxNotFound,
+
+    #[error(
+        "Daemon is not running and could not be started.\nTry running `agentree daemon` manually."
+    )]
+    DaemonNotRunning,
+
+    #[error("Daemon failed to start. Check logs: {log_path}")]
+    DaemonStartFailed { log_path: String },
+
+    #[error("tmux error: {0}")]
+    TmuxError(String),
 }
 
 pub type Result<T> = std::result::Result<T, AgentreeError>;

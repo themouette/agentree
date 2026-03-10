@@ -183,4 +183,31 @@ impl WorkspaceContext {
             was_created,
         })
     }
+
+    /// Determine the effective backend for a workspace.
+    ///
+    /// Priority (highest to lowest):
+    /// 1. CLI `--backend` flag (`cli_backend_given = true`) → use config (which has the override)
+    /// 2. Workspace metadata stored at creation time (only when resuming an existing workspace)
+    /// 3. Config default (`effective_backend()`)
+    ///
+    /// Reading metadata ensures that a workspace created with `--backend local` continues to
+    /// use the local backend even when the global/project config defaults to a different backend.
+    pub fn effective_backend_for(
+        &self,
+        workspace: &WorkspaceSetup,
+        cli_backend_given: bool,
+    ) -> crate::backend::BackendKind {
+        use crate::worktree::metadata::WorktreeMetadata;
+
+        if !cli_backend_given && !workspace.was_created {
+            WorktreeMetadata::load(&workspace.path)
+                .ok()
+                .flatten()
+                .and_then(|m| m.backend.parse().ok())
+                .unwrap_or_else(|| self.config.effective_backend())
+        } else {
+            self.config.effective_backend()
+        }
+    }
 }

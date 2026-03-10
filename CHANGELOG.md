@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`agentree dashboard`** — new command that opens a tmux session with a live
+  workspace list on the left and a dynamic content pane on the right. Displays
+  branch name, agent status, commits ahead, dirty-file count, and last-commit
+  age for every worktree.
+- **`agentree daemon`** — new background process that tracks workspace state by
+  watching `.agentree/` directories in each worktree (sub-second response via
+  `notify`) and serving the dashboard over a Unix socket
+  (`~/.agentree/daemon.sock`). The daemon is started automatically by
+  `agentree dashboard` if not already running.
+- **Agent status protocol** — agents write `.agentree/status.json` (phase +
+  current task) and `.agentree/attention.md` (blocked / needs input) to
+  communicate live state to the dashboard. Both files are excluded from git
+  tracking automatically.
+- **`agentree dashboard --kill`** — terminate an existing dashboard tmux
+  session and its daemon from outside the TUI.
+- **CLAUDE.md template** — when `agentree agent` starts a session, it injects
+  an agentree-specific block into `CLAUDE.md` explaining the status protocol
+  and attention-request convention. The block is removed on session exit.
+- **`.claude/settings.json` per session** — `agentree agent` now merges
+  `allowedTools` entries for `.agentree/**` into `.claude/settings.json` before
+  launching Claude Code, so agents can write status files without tool-use
+  prompts. Entries are cleaned up on exit.
+- **Graceful dashboard shutdown** — pressing `q` (then `y` to confirm) sends
+  SIGTERM to all workspace panes before killing the tmux session, giving agents
+  a chance to clean up. A "Shutting down…" goodbye screen is shown while
+  waiting (up to 10 s).
+- **Welcome / help panel** — press `?` in the dashboard to open a welcome pane
+  explaining the key bindings and status protocol.
+- **Scrollbar** — the workspace list now shows a scrollbar when there are more
+  workspaces than fit on screen.
+- **Detach key** (`d`) — leaves the dashboard session running in the background
+  without killing it (analogous to `tmux detach`). `q` prompts for full
+  teardown.
+- **Robot icon** — the TUI shows a 🤖 icon next to a workspace row when an
+  agent session is live for that branch (presence-based, no polling).
+- **Auto-respawn** — if the content pane dies (e.g. agent exits), the dashboard
+  automatically reopens the welcome panel so the TUI is never left with a dead
+  right pane.
+- **Agent trait abstraction** — agent-specific workspace hooks (`prepare`/`cleanup`) are
+  now encapsulated behind an `Agent` trait, mirroring the `Backend` trait. `ClaudeAgent`
+  implements the CLAUDE.md injection and `.claude/settings.json` allowedTools management.
+  `GenericAgent` provides a no-op implementation for all other agents. The factory
+  `AgentType::from_name` resolves agent names to concrete implementations.
+- **`OpencodeAgent`** — new `Agent` trait implementation for OpenCode. `prepare()` injects
+  an agentree block into `AGENTS.md` (OpenCode's workspace context file), injects a
+  `session_completed` hook into `opencode.json` that writes `{"phase":"done"}` to
+  `.agentree/status.json` when the session ends, and writes `"OpenCode running"` to
+  `.agentree/attention.md` as a guaranteed dashboard signal. `cleanup()` reverts all
+  workspace changes. `AgentType::from_name("opencode")` now resolves to this implementation
+  instead of `GenericAgent`.
+
+### Changed
+
+- **ClaudeAgent hook injection** — `ClaudeAgent::prepare()` now injects Claude Code hook
+  configurations into `.claude/settings.json` under the `hooks` key. The hooks automate
+  the `.agentree/attention.md` lifecycle that previously relied on the agent following
+  `CLAUDE.md` instructions:
+  - **PreToolUse**: writes `attention.md` with `"Waiting for approval: <ToolName>"` before
+    every tool call so the dashboard always reflects what the agent is doing.
+  - **PostToolUse**: deletes `attention.md` as soon as the tool completes.
+  - **UserPromptSubmit**: deletes `attention.md` when the user sends a message.
+  - **Stop**: writes `attention.md` (`"Agent done"`) and `status.json` (`{"phase":"done"}`)
+    when the agent session ends.
+  - `prepare()` also removes any stale `attention.md` from the prior session on startup.
+  - `cleanup()` removes only agentree-owned hook entries, preserving any user-defined hooks.
+  - No change to `CLAUDE.md` template — instructions remain as human-readable fallback.
+- `agentree agent` now writes/cleans up `CLAUDE.md` and `.claude/settings.json`
+  around each session instead of leaving the worktree unmodified.
+
+### Fixed
+
+- Git utilities now use `git rev-parse --git-common-dir` to locate the common
+  git directory, replacing fragile manual `.git` file parsing. This correctly
+  handles both main checkouts and linked worktrees.
+- Dashboard tmux helpers now shell-quote all branch names and paths before
+  passing them to tmux commands, preventing breakage on branches with spaces or
+  special characters.
+
 ## [0.7.4] - 2026-03-01
 
 ### Fixed
